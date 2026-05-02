@@ -66,3 +66,62 @@ def strip_for_voice(text: str, min_words: int = MIN_WORDS_DEFAULT) -> str:
     if len(s.split()) < min_words:
         return ""
     return s
+
+
+import asyncio
+
+from scripts.log import get_logger
+
+VOICIFY_SYSTEM_PROMPT = (
+    "You are rewriting text so it sounds natural when spoken aloud. "
+    "Take the input and return one or two natural spoken sentences, in the "
+    "same first-person voice as the original. Skip technical references, "
+    "code-like fragments, or anything that doesn't sound natural aloud. "
+    "If the input has nothing worth saying aloud, return the empty string. "
+    "Return ONLY the rewritten text — no preface, no quotation marks, no commentary."
+)
+
+
+async def _voicify_async(text: str, model: str) -> str:
+    # Imported lazily so unit tests can run without the SDK installed.
+    from claude_agent_sdk import ClaudeSDKClient, ClaudeAgentOptions  # type: ignore
+
+    options = ClaudeAgentOptions(
+        model=model,
+        system_prompt=VOICIFY_SYSTEM_PROMPT,
+        allowed_tools=[],
+    )
+    parts: list[str] = []
+    async with ClaudeSDKClient(options=options) as client:
+        await client.query(text)
+        async for msg in client.receive_response():
+            for block in getattr(msg, "content", []) or []:
+                t = getattr(block, "text", None)
+                if t:
+                    parts.append(t)
+    return "".join(parts).strip()
+
+
+def voicify(
+    text: str,
+    *,
+    model: str = "claude-haiku-4-5-20251001",
+    max_chars: int = 4000,
+    rewrite_enabled: bool = True,
+) -> str:
+    """Rewrite stripped text into natural spoken prose via Haiku.
+
+    Falls back to returning `text` unchanged if rewrite is disabled or the
+    SDK call fails. Returns '' for empty input. Never raises.
+    """
+    if not text or not text.strip():
+        return ""
+    if not rewrite_enabled:
+        return text
+    if len(text) > max_chars:
+        text = text[-max_chars:]
+    try:
+        return asyncio.run(_voicify_async(text, model))
+    except Exception as e:  # SDK failure must never propagate
+        get_logger().warning("voicify Haiku call failed: %s; using stripped text", e)
+        return text
