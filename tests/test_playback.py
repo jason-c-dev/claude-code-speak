@@ -36,10 +36,16 @@ def test_enqueue_appends_to_queue(voice_home, monkeypatch):
 
 
 def test_clear_and_kill(voice_home, monkeypatch):
+    """clear_and_kill must SIGTERM the player's whole process group so afplay
+    children die with the player — otherwise orphan afplays keep playing."""
     from scripts import playback, state
 
     killed = []
-    monkeypatch.setattr(playback.os, "kill", lambda pid, sig: killed.append((pid, sig)))
+    monkeypatch.setattr(playback.os, "getpgid", lambda pid: pid)  # group == pid for the test
+    monkeypatch.setattr(playback.os, "killpg", lambda pgid, sig: killed.append((pgid, sig)))
+    # os.kill is the legacy fallback; should NOT be called when killpg succeeds.
+    monkeypatch.setattr(playback.os, "kill",
+                        lambda pid, sig: pytest.fail("should use killpg, not kill"))
 
     s = state.load("sess2")
     s.current_pid = 12345

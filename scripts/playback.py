@@ -75,11 +75,21 @@ def clear_and_kill(session_id: str) -> None:
         return
 
     if s.current_pid:
+        # The player was spawned with start_new_session=True so it's in its own
+        # process group. SIGTERM the whole group so afplay (spawned by the
+        # player) dies too — otherwise orphan afplays keep playing across turns.
         try:
-            os.kill(s.current_pid, signal.SIGTERM)
-            log.info("killed player pid=%d for %s", s.current_pid, session_id)
+            pgid = os.getpgid(s.current_pid)
+            os.killpg(pgid, signal.SIGTERM)
+            log.info("killed player pgid=%d (pid=%d) for %s", pgid, s.current_pid, session_id)
         except ProcessLookupError:
             pass
+        except PermissionError:
+            # Fall back to single-pid kill if we somehow don't own the group.
+            try:
+                os.kill(s.current_pid, signal.SIGTERM)
+            except Exception:
+                pass
         except Exception as e:
             log.warning("failed to kill pid=%d: %s", s.current_pid, e)
 
