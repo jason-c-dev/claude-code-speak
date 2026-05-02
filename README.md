@@ -31,17 +31,22 @@ Mode is set via `config.json`. The setup skill regenerates `hooks/hooks.json` so
 
 ## Install
 
-This plugin currently lives as a local repository. Once published to a marketplace, install will be a one-liner.
+Inside a Claude Code session:
 
-For now:
+```
+/plugin marketplace add jason-c-dev/claude-code-speak
+/plugin install claude-voice@claude-code-speak
+/reload-plugins
+```
+
+Or from a local clone:
 
 ```bash
-# clone (or `cd` into wherever you have this repo)
-git clone <this-repo-url> ~/dev/claude-chat
-cd ~/dev/claude-chat
-
-# inside Claude Code, install the local plugin
-/plugin install /Users/$USER/dev/claude-chat
+git clone https://github.com/jason-c-dev/claude-code-speak ~/dev/claude-code-speak
+```
+```
+/plugin marketplace add ~/dev/claude-code-speak
+/plugin install claude-voice@claude-code-speak
 /reload-plugins
 ```
 

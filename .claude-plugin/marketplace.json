@@ -1,0 +1,32 @@
+{
+  "name": "claude-code-speak",
+  "owner": {
+    "name": "Jason",
+    "email": "jace.croucher@gmail.com"
+  },
+  "metadata": {
+    "description": "Claude Code plugin that gives Claude a spoken voice via Deepgram Aura-2 with macOS `say` fallback",
+    "version": "0.1.0"
+  },
+  "plugins": [
+    {
+      "name": "claude-voice",
+      "source": "./",
+      "description": "Speaks the natural-language portions of Claude's responses aloud through Deepgram Aura-2 (with `say` fallback). Three modes: end-of-turn, live commentary, or hybrid with attention alerts.",
+      "version": "0.1.0",
+      "author": {
+        "name": "Jason"
+      },
+      "category": "developer-experience",
+      "keywords": [
+        "voice",
+        "tts",
+        "deepgram",
+        "aura",
+        "speech",
+        "accessibility",
+        "macos"
+      ]
+    }
+  ]
+}
