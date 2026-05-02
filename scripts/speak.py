@@ -13,7 +13,7 @@ import json
 from scripts import extract, playback, state as state_mod
 from scripts.config import load as load_config, plugin_root
 from scripts.log import get_logger
-from scripts.transcript import last_assistant_text, wait_for_settle
+from scripts.transcript import last_assistant_text, wait_for_new_message
 
 
 def _mode_b_narration_instructions() -> str:
@@ -55,17 +55,19 @@ def _handle_stop(payload: dict) -> None:
         log.info("Stop: session %s is not the active session; skipping", session_id)
         return
 
-    # Stop sometimes fires before the model's final text block has flushed to
-    # the JSONL (notably after Skill tool calls). Wait briefly for the file
-    # size to settle so last_assistant_text returns the actual final text,
-    # not the previous message.
-    wait_for_settle(transcript)
-
-    res = last_assistant_text(transcript)
+    # The JSONL flush sometimes lags Stop hook fire by a second or more
+    # (most reliably reproducible after a Skill tool call). Anchor on
+    # "have we seen a NEW msg id since the last one we spoke" rather than
+    # blindly reading whatever's in the file — otherwise we re-speak the
+    # previous turn's message because the new one isn't written yet.
+    res = wait_for_new_message(transcript, s.last_spoken_msg_id)
     if res is None:
-        log.info("Stop: no assistant message in transcript; nothing to speak")
+        log.info(
+            "Stop: no new assistant message after wait (last_spoken=%r); skipping",
+            s.last_spoken_msg_id,
+        )
         return
-    _msg_id, full_text = res
+    msg_id, full_text = res
 
     stripped = extract.strip_for_voice(full_text, min_words=cfg.min_words)
     if not stripped:
@@ -93,6 +95,15 @@ def _handle_stop(payload: dict) -> None:
     for chunk in chunks:
         playback.enqueue(session_id, chunk)
 
+    # Record this msg id as spoken so the next Stop will wait for a NEW one
+    # rather than re-speaking this turn.
+    try:
+        s = state_mod.load(session_id)
+        s.last_spoken_msg_id = msg_id
+        state_mod.save(s)
+    except Exception as e:
+        log.warning("Stop: failed to record last_spoken_msg_id=%r: %s", msg_id, e)
+
 
 def _handle_user_prompt_submit(payload: dict) -> None:
     session_id = payload.get("session_id") or "default"
@@ -101,6 +112,18 @@ def _handle_user_prompt_submit(payload: dict) -> None:
     # speak for it. Subagents never reach this hook.
     s = state_mod.load(session_id)
     s.interactive = True
+
+    # Mark whatever assistant message currently sits at the end of the
+    # transcript as "already spoken." On the next Stop, wait_for_new_message
+    # will then poll until a NEW msg id appears (this turn's response),
+    # rather than re-speaking the previous turn's text. Without this, the
+    # field starts as None on first deploy and the very next Stop would
+    # treat the previous turn's response as "new."
+    transcript = Path(payload.get("transcript_path") or "")
+    res = last_assistant_text(transcript)
+    if res is not None:
+        s.last_spoken_msg_id = res[0]
+
     state_mod.save(s)
     # Take over as the active speaking session — any previously-active session
     # (e.g. a second Claude Code window) goes silent until the user prompts

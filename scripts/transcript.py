@@ -94,6 +94,41 @@ def wait_for_settle(
             return
 
 
+def wait_for_new_message(
+    transcript_path: Path,
+    last_spoken_id: str | None,
+    *,
+    max_ms: int = 5000,
+    poll_ms: int = 100,
+) -> "tuple[str, str] | None":
+    """Poll the transcript until the latest assistant message id differs from
+    `last_spoken_id`, or until `max_ms` elapses.
+
+    Returns (msg_id, text) for the new message, or None if no new message
+    appears within the budget. None for `last_spoken_id` matches "speak the
+    first message we see" — useful on a fresh session.
+
+    Replaces the older `wait_for_settle` approach: file size stability is not
+    a reliable signal because Claude Code sometimes writes the new assistant
+    message to JSONL *after* the Stop hook has run, in which case settle
+    detects nothing because nothing is happening yet. Anchoring on
+    "have we seen a NEW msg id" is the correct semantic — we only speak text
+    we haven't already spoken.
+    """
+    if transcript_path is None:
+        return None
+    deadline = time.monotonic() + max_ms / 1000.0
+    poll_seconds = poll_ms / 1000.0
+    last_seen: tuple[str, str] | None = None
+    while True:
+        last_seen = last_assistant_text(transcript_path)
+        if last_seen is not None and last_seen[0] != last_spoken_id:
+            return last_seen
+        if time.monotonic() >= deadline:
+            return None
+        time.sleep(poll_seconds)
+
+
 def last_assistant_text(transcript_path: Path) -> tuple[str, str] | None:
     """Return (message_id, concatenated_text) for the last assistant message,
     or None if no assistant message exists.

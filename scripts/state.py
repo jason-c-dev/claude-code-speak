@@ -55,6 +55,11 @@ class SessionState:
     # programmatic Claude Code instances never get UserPromptSubmit, so this
     # gate prevents speech from leaking out of every parallel agent on the box.
     interactive: bool = False
+    # Message id of the most-recent assistant turn we already spoke. Used by
+    # the Stop handler to wait for a *new* assistant message before speaking,
+    # since the JSONL flush sometimes lags Stop hook fire by more than the
+    # transcript settle window.
+    last_spoken_msg_id: str | None = None
 
 
 def _path(session_id: str) -> Path:
@@ -91,6 +96,7 @@ def load(session_id: str) -> SessionState:
         current_pid=raw.get("current_pid"),
         queue=raw.get("queue") or [],
         interactive=bool(raw.get("interactive", False)),
+        last_spoken_msg_id=raw.get("last_spoken_msg_id") or None,
     )
 
 
