@@ -74,8 +74,11 @@ def test_stop_skips_when_strip_returns_empty(voice_home, plugin_root, write_conf
     assert speak.run(json.dumps(payload)) == 0
 
 
-def test_stop_skips_when_voicify_returns_empty(voice_home, plugin_root, write_config,
-                                                monkeypatch, tmp_path):
+def test_stop_falls_back_to_stripped_when_voicify_returns_empty(
+    voice_home, plugin_root, write_config, monkeypatch, tmp_path
+):
+    """Safety net: if Haiku returns empty for non-trivial input, voicify falls
+    back to the stripped text so the turn still produces audio."""
     write_config({"enabled": True, "mode": "A"})
     transcript = tmp_path / "session.jsonl"
     _write_jsonl(transcript, [
@@ -83,13 +86,26 @@ def test_stop_skips_when_voicify_returns_empty(voice_home, plugin_root, write_co
             {"type": "text", "text": "Here is some prose to speak about today."}
         ]}},
     ])
-    from scripts import speak, extract, tts
+    from scripts import speak, extract, tts, playback
 
     monkeypatch.setattr(extract, "_voicify_async", lambda text, model: _async_return(""))
-    monkeypatch.setattr(tts, "synthesize", lambda text: pytest.fail("tts should not run"))
+    fake = voice_home / "tmp" / "fb.mp3"
+    fake.parent.mkdir(parents=True, exist_ok=True)
+    fake.write_bytes(b"audio")
+    synth_calls = []
+    def fake_synth(text):
+        synth_calls.append(text)
+        return fake
+    monkeypatch.setattr(tts, "synthesize", fake_synth)
+    enqueued = []
+    monkeypatch.setattr(playback, "enqueue", lambda s, p: enqueued.append((s, p)))
+
     payload = {"session_id": "x", "transcript_path": str(transcript),
                "hook_event_name": "Stop"}
     assert speak.run(json.dumps(payload)) == 0
+    assert synth_calls, "synthesize should have been called with stripped fallback"
+    assert "Here is some prose" in synth_calls[0]
+    assert enqueued == [("x", fake)]
 
 
 # --- helpers ---
