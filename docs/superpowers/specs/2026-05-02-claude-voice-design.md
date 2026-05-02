@@ -1,8 +1,10 @@
 # Claude Voice — Design Spec
 
 **Date:** 2026-05-02
-**Status:** Draft for review
+**Status:** Shipped (v1) + streaming-playback follow-up
 **Owner:** Jason
+
+> **Update 2026-05-02:** The "streaming TTS playback" item originally listed as deferred has shipped. The Playback section below describes the current implementation. Time-to-first-audio dropped from ~9s on long replies to ~1s, and inter-chunk gaps are eliminated.
 
 ## Goal
 
@@ -36,15 +38,20 @@ Claude Code session
   Claude Agent SDK (Max plan auth)      one-shot, max_turns=1
         │
         ▼
-  tts.synthesize(voiced) →
-        Deepgram primary  -or- say fallback
+  extract.split_into_chunks(voiced) →   sentence-sized chunks
         │
         ▼
-  playback.enqueue(audio_path)          FIFO queue per session,
-                                        UserPromptSubmit clears + kills
+  playback.enqueue(session, chunk)      FIFO text queue per session,
+        │                                UserPromptSubmit clears + kills
+        ▼
+  player_loop subprocess  →
+  tts.synthesize_and_play_session →
+        Deepgram bytes → ffplay stdin   streaming primary
+        -or- Deepgram → mp3 → afplay    file-based fallback
+        -or- say → aiff → afplay        local fallback
 ```
 
-Each hook event is a fully isolated invocation of `speak.py`. State that needs to persist across events (the per-session "what's been spoken already" offset, the current `afplay` PID) lives in `~/.claude/voice/state/<session_id>.json`.
+Each hook event is a fully isolated invocation of `speak.py`. State that needs to persist across events (the per-session "what's been spoken already" offset, the queued text chunks, the current player subprocess PID) lives in `~/.claude/voice/state/<session_id>.json`.
 
 ## Modes
 
@@ -134,16 +141,22 @@ Every fallback transition is logged to `~/.claude/voice/voice.log` for diagnosti
 - Concurrency on Pay-As-You-Go is ~15 simultaneous REST requests — well above what a single user session generates.
 - Aura-2 voice IDs follow the pattern `aura-2-<name>-<lang>` (e.g. `aura-2-thalia-en`, `aura-2-orion-en`, `aura-2-pandora-en`). The setup skill picks from a curated 6-voice subset; `config.voice` accepts any valid Aura-2 model ID.
 
-### 5. Playback — `playback.enqueue(audio_path)`
+### 5. Playback — `playback.enqueue(session_id, text)`
 
-FIFO queue per session. On enqueue:
+FIFO queue per session, but the queue holds **text chunks** (not file paths) so synthesis happens lazily inside the player subprocess. On enqueue:
 
-- If no audio currently playing, fork an `afplay <path>` subprocess and record its PID in the session state file.
-- Otherwise, append to the queue file. A short watchdog (a separate `afplay` orchestrator script started lazily) checks for the next item when the current playback ends.
+- Append the chunk to the session's queue.
+- If no player subprocess is running for this session, fork one (a detached Python child running `playback.player_loop`). Record its PID in the session state file.
 
-`UserPromptSubmit` hook fires `kill <stored_pid>` and truncates the queue file. Audio from the prior turn never bleeds into the next turn.
+The player subprocess drives the queue through `tts.synthesize_and_play_session`, which prefers a streaming pipeline:
 
-Played audio files are deleted from `~/.claude/voice/tmp/` after playback. The directory is cleaned on `SessionEnd`.
+1. **Streaming (preferred):** spawn one `ffplay -nodisp -autoexit -fflags nobuffer -probesize 32 -analyzeduration 0 -i pipe:0` for the whole reply. For each text chunk pulled from the queue, open a Deepgram POST and pump 4KB response chunks straight into ffplay's stdin (`bufsize=0` + explicit `flush()` after every write, so bytes hit the pipe immediately). The next chunk's Deepgram request reuses the same ffplay stdin, which means audio plays gaplessly across chunk boundaries — by the time ffplay's output buffer drains the previous chunk, the next chunk's bytes are already arriving. Time-to-first-audio is dominated by Deepgram's TTFB (~500ms-1s).
+2. **File-based fallback:** if `ffplay` isn't on `PATH`, or Deepgram errors mid-stream, drop to the original Deepgram-to-mp3-then-`afplay` path per chunk. Each chunk gets a fresh `afplay`. This is the v1 behavior and is still correct, just slower (the buffered Deepgram body has to fully arrive before any sound).
+3. **Silent skip (last resort):** if both `ffplay` and `afplay` are missing or every backend errors, log and exit. Voice is never load-bearing.
+
+The player subprocess is started with `start_new_session=True`, putting `ffplay`/`afplay` in the player's process group. `UserPromptSubmit`'s `clear_and_kill` SIGTERMs the whole group, so audio dies cleanly even mid-stream when the user starts a new turn.
+
+Temp mp3/aiff files (only used in the fallback path) are deleted after playback. The directory is cleaned on `SessionEnd`.
 
 ## Configuration
 
@@ -208,6 +221,8 @@ Re-running the skill at any time updates one or more of those steps (mode change
 | Haiku rewrite returns empty | Skip TTS — correct signal. |
 | Stripped text < 3 words | Skip — nothing worth saying. |
 | Haiku input > 4000 chars | Truncate from start. |
+| `ffplay` not on PATH | Fall back to file-based `afplay` per chunk; log once. |
+| Deepgram closes connection mid-chunk | Log; try the next chunk on the same `ffplay`; if none stream, fall back to file path. |
 | `afplay` not on PATH | Log; silent skip. |
 | `config.enabled == false` | `speak.py` exits 0 immediately. |
 | Mode B/C "already spoken" check | Session state file `~/.claude/voice/state/<session_id>.json` records byte offsets per assistant message id. |
@@ -222,7 +237,8 @@ Re-running the skill at any time updates one or more of those steps (mode change
 TDD on the extract pipeline since that is where the real logic lives.
 
 - `tests/test_extract.py` — fixtures of representative responses (code-heavy, prose-heavy, all bullets, single sentence, empty, only emoji, file paths, URLs, mixed). Assert `strip_for_voice()` returns the expected prose. Mock `claude_agent_sdk` for `voicify()` happy path and auth-failure fallback.
-- `tests/test_tts.py` — mock `urllib.request` for Deepgram. Assert primary success, 401 falls through to `say`, 5xx falls through to `say`, both fail = silent skip. Mock `subprocess` for the `say` invocation.
+- `tests/test_tts_deepgram.py` / `tests/test_tts_chain.py` — mock `urllib.request` for Deepgram. Assert primary success, 401 falls through to `say`, 5xx falls through to `say`, both fail = silent skip. Mock `subprocess` for the `say` invocation.
+- `tests/test_tts_streaming.py` / `tests/test_tts_streaming_session.py` — pin the streaming pipeline: ffplay flags include `nobuffer`/`probesize 32`/`analyzeduration 0`, `bufsize=0` plus per-write `flush()`, multi-chunk single-ffplay session, mid-chunk failure recovery, ffplay-missing fallback.
 - `tests/test_speak.py` — fixture transcript JSONL files plus hook event JSON on stdin. Assert dispatch by event type and that `config.enabled = false` short-circuits.
 - `tests/test_playback.py` — mock `subprocess` for `afplay`. Assert FIFO queue order, that `UserPromptSubmit` kills the PID and clears the queue file.
 
@@ -268,7 +284,8 @@ User-level data (state, secrets, logs, tmp audio) lives outside the plugin at:
 
 ## Open items intentionally deferred (YAGNI)
 
-- Streaming TTS playback (start audio before synthesis completes).
+- ~~Streaming TTS playback (start audio before synthesis completes).~~ **Shipped 2026-05-02 (post-v1).** Deepgram bytes stream into one ffplay process per reply; sentence-sized chunks share that ffplay so audio plays gaplessly. See Playback section.
+- **Overlap synthesis across chunks.** Today the next chunk's Deepgram request fires only after the previous chunk's response body fully arrives. Kicking it off earlier — while the previous chunk's audio is still draining out of ffplay — would hide Deepgram's TTFB behind playback and shave ~500ms off each chunk transition. Worth it only if perceptible seams appear; the current pipeline already sounds gapless to a human ear.
 - Per-mode voice (e.g. one voice for prose, another for notifications).
 - Linux/Windows fallback. (Ship macOS-only first.)
 - Cost / usage telemetry beyond the log file.

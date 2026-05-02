@@ -2,15 +2,15 @@
 
 A Claude Code plugin that gives Claude a spoken voice. The natural-language parts of Claude's responses are spoken aloud through Deepgram Aura-2 (with macOS `say` as a local fallback). Code, tool calls, file paths, and other non-prose are filtered out.
 
-> Status: design phase. The spec lives at [`docs/superpowers/specs/2026-05-02-claude-voice-design.md`](docs/superpowers/specs/2026-05-02-claude-voice-design.md). Implementation lands in subsequent commits.
-
 ## What it does
 
 - Hooks into Claude Code's `Stop` event (and optionally `Notification`) to extract the speakable prose from each turn.
 - Strips code blocks, file paths, URLs, and markdown formatting so only natural sentences remain.
-- Runs the result through Claude Haiku 4.5 to polish into one or two natural-sounding spoken sentences.
+- Optionally runs the result through Claude Haiku 4.5 to lightly polish phrasing (off by default — see `config.rewrite`).
 - Sends the polished text to Deepgram Aura-2 for high-quality TTS, with `say` as a local fallback if Deepgram is unconfigured or unreachable.
-- Plays the audio with `afplay`. Audio from a prior turn is killed the moment you send a new prompt.
+- Streams Deepgram's audio bytes directly into `ffplay`'s stdin so the first sentence starts playing within ~1s instead of waiting for the full mp3. Long replies split into sentence-sized chunks; consecutive chunks share one `ffplay` so audio plays gaplessly across chunk boundaries.
+- Falls back to file-based `afplay` playback if `ffplay` is not installed.
+- Audio from a prior turn is killed the moment you send a new prompt.
 
 ## Modes
 
@@ -26,8 +26,9 @@ Mode is set via `config.json`. The setup skill regenerates `hooks/hooks.json` so
 
 - macOS (the `say` fallback is Darwin-only)
 - Python 3.10+
-- [Claude Code](https://claude.com/claude-code) with a Max plan (so the Haiku rewrite step is free)
+- [Claude Code](https://claude.com/claude-code) with a Max plan (only needed if you re-enable the Haiku rewrite step; off by default)
 - Optional but recommended: a [Deepgram](https://deepgram.com) API key (free tier works; Aura-2 voices are well above `say` quality)
+- Optional but recommended: `ffplay` from `ffmpeg` (`brew install ffmpeg`). With `ffplay`, audio streams directly from Deepgram for ~1s time-to-first-audio. Without it, the plugin falls back to writing temp mp3s and playing with `afplay`.
 
 ## Install
 
@@ -110,9 +111,10 @@ Common fallbacks:
 
 | Situation | What happens |
 |---|---|
+| `ffplay` not installed | Use file-based playback (Deepgram → temp mp3 → `afplay`) |
+| Deepgram 5xx, timeout, or mid-stream error | Fall through to file-based playback, then to `say` if needed |
 | No Deepgram key configured | Speak via `say` instead |
-| Deepgram 5xx or timeout | Fall through to `say` |
-| Haiku auth fails | Speak the heuristic-stripped text raw |
+| Haiku auth fails (when rewrite is enabled) | Speak the heuristic-stripped text raw |
 | Stripped text is empty | Stay silent for this turn |
 | Audio device unavailable | Log and stay silent |
 
@@ -136,7 +138,7 @@ The plugin repo itself contains code, hooks, the setup skill, the spec, and exam
 
 ## Roadmap (post-v1)
 
-- Streaming TTS playback (start audio before synthesis completes).
+- Overlap synthesis: kick off the next chunk's Deepgram request before the current chunk finishes streaming, so its bytes are ready the moment the previous audio drains.
 - Linux/Windows fallback (replace `say` with `espeak-ng` or Piper).
 - A `/voice mute` slash command for quick toggling.
 - Cost telemetry surfaced through the setup skill.
