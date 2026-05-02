@@ -1,0 +1,9 @@
+{
+  "name": "claude-voice",
+  "version": "0.1.0",
+  "description": "Give Claude a voice via Deepgram Aura-2 with macOS `say` fallback",
+  "author": {
+    "name": "Jason",
+    "email": "jace.croucher@gmail.com"
+  }
+}
