@@ -2,6 +2,7 @@
 from __future__ import annotations
 import json
 import os
+import tempfile
 import time
 from dataclasses import dataclass, field, asdict
 from pathlib import Path
@@ -24,7 +25,21 @@ class SessionState:
 
 
 def _path(session_id: str) -> Path:
-    return state_dir() / f"{session_id}.json"
+    """Return the state file path for session_id, pinned inside state_dir().
+
+    Defensive: replace path separators and reject ids that would escape the
+    state directory. Claude Code session ids are opaque in practice; this
+    is belt-and-suspenders.
+    """
+    safe = session_id.replace("/", "_").replace("\\", "_").replace("\x00", "_")
+    if safe in (".", "..") or not safe:
+        safe = "_invalid_"
+    sd = state_dir().resolve()
+    candidate = (sd / f"{safe}.json").resolve()
+    # Containment check: candidate must be a direct child of sd.
+    if candidate.parent != sd:
+        return sd / "_unsafe_session_id_.json"
+    return candidate
 
 
 def load(session_id: str) -> SessionState:
@@ -47,8 +62,28 @@ def load(session_id: str) -> SessionState:
 
 
 def save(state: SessionState) -> None:
-    path = _path(state.session_id)
-    path.write_text(json.dumps(asdict(state)))
+    """Persist state atomically. Never raises — voice is never load-bearing."""
+    log = get_logger()
+    try:
+        path = _path(state.session_id)
+        path.parent.mkdir(parents=True, exist_ok=True)
+        # Write to a sibling tmp file then atomic rename so concurrent readers
+        # never observe a half-written JSON document.
+        with tempfile.NamedTemporaryFile(
+            mode="w",
+            dir=str(path.parent),
+            prefix=f".{path.stem}.",
+            suffix=".tmp",
+            delete=False,
+            encoding="utf-8",
+        ) as tmp:
+            json.dump(asdict(state), tmp)
+            tmp.flush()
+            os.fsync(tmp.fileno())
+            tmp_path = Path(tmp.name)
+        os.replace(tmp_path, path)
+    except (OSError, TypeError, ValueError) as e:
+        log.warning("state save failed for %s: %s", state.session_id, e)
 
 
 def remove(session_id: str) -> None:
@@ -59,9 +94,15 @@ def remove(session_id: str) -> None:
 
 def clean_stale(max_age_seconds: int = 24 * 3600) -> None:
     cutoff = time.time() - max_age_seconds
-    for f in state_dir().glob("*.json"):
+    try:
+        files = list(state_dir().glob("*.json"))
+    except OSError:
+        return
+    for f in files:
         try:
             if f.stat().st_mtime < cutoff:
                 f.unlink()
-        except FileNotFoundError:
-            pass
+        except OSError:
+            # Tolerate FileNotFoundError, PermissionError, IsADirectoryError, etc.
+            # clean_stale is best-effort housekeeping.
+            continue
