@@ -25,10 +25,11 @@ def test_stop_pipeline_strip_voicify_synth_enqueue(voice_home, plugin_root,
 
     from scripts import speak, extract, tts, playback, state as state_mod
 
-    # Mark session interactive (UserPromptSubmit would have done this).
+    # Mark session interactive AND active (UserPromptSubmit would have done both).
     s = state_mod.load("abc")
     s.interactive = True
     state_mod.save(s)
+    state_mod.set_active_session("abc")
 
     # Mock the rewrite step so we don't hit the SDK.
     monkeypatch.setattr(extract, "_voicify_async",
@@ -98,6 +99,7 @@ def test_stop_skips_when_strip_returns_empty(voice_home, plugin_root, write_conf
     s = state_mod.load("x")
     s.interactive = True
     state_mod.save(s)
+    state_mod.set_active_session("x")
 
     monkeypatch.setattr(extract, "_voicify_async",
                         lambda text, model: pytest.fail("voicify should not be called"))
@@ -124,6 +126,7 @@ def test_stop_falls_back_to_stripped_when_voicify_returns_empty(
     s = state_mod.load("x")
     s.interactive = True
     state_mod.save(s)
+    state_mod.set_active_session("x")
 
     monkeypatch.setattr(extract, "_voicify_async", lambda text, model: _async_return(""))
     fake = voice_home / "tmp" / "fb.mp3"
@@ -143,6 +146,38 @@ def test_stop_falls_back_to_stripped_when_voicify_returns_empty(
     assert synth_calls, "synthesize should have been called with stripped fallback"
     assert "Here is some prose" in synth_calls[0]
     assert enqueued == [("x", fake)]
+
+
+def test_stop_skipped_when_session_is_not_active(voice_home, plugin_root,
+                                                   write_config, monkeypatch, tmp_path):
+    """When a second Claude Code window has more recently received a prompt,
+    the older window's Stop must NOT speak — only the active session does."""
+    write_config({"enabled": True, "mode": "A"})
+    transcript = tmp_path / "session.jsonl"
+    _write_jsonl(transcript, [
+        {"type": "assistant", "message": {"id": "m1", "content": [
+            {"type": "text", "text": "Old window response that should not speak."}
+        ]}},
+    ])
+    from scripts import speak, tts, playback, state as state_mod
+
+    # Both sessions are interactive, but only "newer-window" is active.
+    s1 = state_mod.load("older-window")
+    s1.interactive = True
+    state_mod.save(s1)
+    s2 = state_mod.load("newer-window")
+    s2.interactive = True
+    state_mod.save(s2)
+    state_mod.set_active_session("newer-window")
+
+    monkeypatch.setattr(tts, "synthesize",
+                        lambda text: pytest.fail("inactive session should not synth"))
+    monkeypatch.setattr(playback, "enqueue",
+                        lambda *a, **kw: pytest.fail("inactive session should not enqueue"))
+
+    payload = {"session_id": "older-window", "transcript_path": str(transcript),
+               "hook_event_name": "Stop"}
+    assert speak.run(json.dumps(payload)) == 0
 
 
 # --- helpers ---

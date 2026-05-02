@@ -41,14 +41,18 @@ def _handle_stop(payload: dict) -> None:
     transcript = Path(payload.get("transcript_path") or "")
     session_id = payload.get("session_id") or "default"
 
-    # Gate: only speak for sessions a human is actually driving. Subagents and
-    # other programmatic Claude Code instances never receive UserPromptSubmit,
-    # so without this check every parallel agent on the box would speak its
-    # final response.
+    # Gate 1: only speak for sessions a human is actually driving. Subagents
+    # never receive UserPromptSubmit, so this filters out parallel agents.
     s = state_mod.load(session_id)
     if not s.interactive:
-        log.info("Stop: session %s is not interactive (no UserPromptSubmit seen); skipping",
-                 session_id)
+        log.info("Stop: session %s not interactive; skipping", session_id)
+        return
+
+    # Gate 2: only speak for the most-recently-prompted session. Two Claude
+    # Code windows could both be flagged interactive; we want only the one
+    # the user just typed into to speak.
+    if not state_mod.is_active_session(session_id):
+        log.info("Stop: session %s is not the active session; skipping", session_id)
         return
 
     res = last_assistant_text(transcript)
@@ -90,6 +94,29 @@ def _handle_user_prompt_submit(payload: dict) -> None:
     s = state_mod.load(session_id)
     s.interactive = True
     state_mod.save(s)
+    # Take over as the active speaking session — any previously-active session
+    # (e.g. a second Claude Code window) goes silent until the user prompts
+    # in it again.
+    state_mod.set_active_session(session_id)
+    # Also kill any audio that other sessions had queued or were playing,
+    # so we don't get cross-talk from a window that just lost active status.
+    _kill_other_sessions(session_id)
+
+
+def _kill_other_sessions(active_session_id: str) -> None:
+    """Stop and clear playback for every session other than the newly-active one."""
+    log = get_logger()
+    try:
+        for f in state_mod.state_dir().glob("*.json"):
+            sid = f.stem
+            if sid == active_session_id:
+                continue
+            try:
+                playback.clear_and_kill(sid)
+            except Exception as e:
+                log.warning("clear_and_kill failed for %s: %s", sid, e)
+    except OSError as e:
+        log.warning("could not enumerate state dir: %s", e)
 
 
 def _handle_session_start(payload: dict) -> None:
@@ -117,6 +144,9 @@ def _handle_notification(payload: dict) -> None:
     s = state_mod.load(session_id)
     if not s.interactive:
         get_logger().info("Notification: session %s not interactive; skipping", session_id)
+        return
+    if not state_mod.is_active_session(session_id):
+        get_logger().info("Notification: session %s is not the active session; skipping", session_id)
         return
     msg = payload.get("message") or ""
     if not msg.strip():

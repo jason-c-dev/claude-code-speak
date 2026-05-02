@@ -16,6 +16,35 @@ def state_dir() -> Path:
     return d
 
 
+def _active_pointer_path() -> Path:
+    return voice_home() / "active_session"
+
+
+def set_active_session(session_id: str) -> None:
+    """Mark `session_id` as the single session whose Stop/Notification hooks
+    should produce speech. Prevents two simultaneously-open Claude Code windows
+    from both speaking — the most-recently-prompted one wins."""
+    try:
+        _active_pointer_path().write_text(session_id)
+    except OSError as e:
+        get_logger().warning("set_active_session failed: %s", e)
+
+
+def get_active_session() -> str | None:
+    try:
+        return _active_pointer_path().read_text().strip() or None
+    except OSError:
+        return None
+
+
+def is_active_session(session_id: str) -> bool:
+    """A session is active if it's the most-recently-prompted one. If no
+    pointer exists yet (first prompt of an install), default to True so
+    the very first turn still speaks."""
+    active = get_active_session()
+    return active is None or active == session_id
+
+
 @dataclass
 class SessionState:
     session_id: str

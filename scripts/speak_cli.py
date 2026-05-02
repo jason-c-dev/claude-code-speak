@@ -26,27 +26,34 @@ from scripts.config import load as load_config
 from scripts.log import get_logger, voice_home
 
 
-def _latest_interactive_session_id() -> str | None:
-    """Session id of the most-recently-modified state file whose `interactive`
-    flag is True. Returns None if no interactive session exists.
+def _active_interactive_session_id() -> str | None:
+    """Session id of the currently-active speaking session, but only if it's
+    interactive. Returns None otherwise.
 
-    Limiting to interactive sessions prevents CLI invocations made by
-    subagents or other programmatic Claude Code instances from playing
-    audio (which would stack with the user's own session)."""
-    state_dir = voice_home() / "state"
-    try:
-        files = sorted(
-            state_dir.glob("*.json"),
-            key=lambda p: p.stat().st_mtime,
-            reverse=True,
-        )
-    except OSError:
+    "Active" = most-recently-prompted session. Set via UserPromptSubmit. This
+    ensures CLI cues land in the same session that the user is currently
+    typing into, even if a different terminal has a more recently-modified
+    state file (e.g. a subagent that just wrote to its state)."""
+    active = state_mod.get_active_session()
+    if not active:
+        # Fallback: most-recently-modified interactive session (first install,
+        # or pointer was lost).
+        state_d = voice_home() / "state"
+        try:
+            files = sorted(
+                state_d.glob("*.json"),
+                key=lambda p: p.stat().st_mtime,
+                reverse=True,
+            )
+        except OSError:
+            return None
+        for f in files:
+            s = state_mod.load(f.stem)
+            if s.interactive:
+                return f.stem
         return None
-    for f in files:
-        s = state_mod.load(f.stem)
-        if s.interactive:
-            return f.stem
-    return None
+    s = state_mod.load(active)
+    return active if s.interactive else None
 
 
 def _run(text: str) -> int:
@@ -90,9 +97,9 @@ def _run(text: str) -> int:
         log.warning("speak_cli: TTS produced no audio; skipping")
         return 0
 
-    sid = _latest_interactive_session_id()
+    sid = _active_interactive_session_id()
     if sid is None:
-        log.info("speak_cli: no interactive session found; skipping playback")
+        log.info("speak_cli: no active interactive session; skipping playback")
         return 0
     playback.enqueue(sid, audio)
     return 0

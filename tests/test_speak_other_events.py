@@ -52,6 +52,33 @@ def test_userpromptsubmit_marks_session_interactive(voice_home, plugin_root,
     assert s2.interactive is True
 
 
+def test_userpromptsubmit_takes_over_active_session(voice_home, plugin_root,
+                                                     write_config, monkeypatch):
+    """A new UserPromptSubmit makes its session the only one allowed to speak.
+    Previous active sessions get their queues cleared so they go silent
+    immediately."""
+    write_config({"enabled": True, "mode": "A"})
+    from scripts import speak, playback, state as state_mod
+
+    # Pre-existing 'old' session was previously active.
+    s_old = state_mod.load("old-session")
+    s_old.interactive = True
+    state_mod.save(s_old)
+    state_mod.set_active_session("old-session")
+
+    killed = []
+    monkeypatch.setattr(playback, "clear_and_kill", lambda sid: killed.append(sid))
+
+    speak.run(json.dumps({"session_id": "new-session",
+                          "hook_event_name": "UserPromptSubmit"}))
+
+    assert state_mod.get_active_session() == "new-session"
+    # old-session must have been silenced.
+    assert "old-session" in killed
+    # new-session also cleared (its own UserPromptSubmit normally does this).
+    assert "new-session" in killed
+
+
 def test_notification_skipped_for_non_interactive_session(voice_home, plugin_root,
                                                             write_config, monkeypatch):
     """Notification (mode C) must also gate on interactive. A subagent emitting
@@ -104,6 +131,7 @@ def test_notification_speaks_message_in_mode_C(voice_home, plugin_root,
     s = state_mod.load("S")
     s.interactive = True
     state_mod.save(s)
+    state_mod.set_active_session("S")
 
     monkeypatch.setattr(extract, "_voicify_async",
                         lambda text, model: _async_return("Heads up!"))
