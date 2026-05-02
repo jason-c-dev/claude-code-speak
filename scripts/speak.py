@@ -11,9 +11,28 @@ if _PLUGIN_ROOT not in sys.path:
 
 import json
 from scripts import extract, playback, state as state_mod, tts
-from scripts.config import load as load_config
+from scripts.config import load as load_config, plugin_root
 from scripts.log import get_logger
 from scripts.transcript import last_assistant_text
+
+
+def _mode_b_narration_instructions() -> str:
+    """Instructions Claude needs to narrate via the speak CLI in mode B."""
+    cli = plugin_root() / "scripts" / "speak_cli.py"
+    return (
+        "Claude Voice mode B is active. Before issuing a tool call that may "
+        "take more than a moment (web fetches, searches, file reads on "
+        "unfamiliar code, MCP calls, etc.), narrate a short cue out loud by "
+        "running this Bash command IMMEDIATELY before the tool call:\n\n"
+        f"    python3 \"{cli}\" \"<short cue>\"\n\n"
+        "The cue should be 2-6 conversational words like \"Looking that up\", "
+        "\"Pulling it up\", \"Checking now\", \"On it\". Keep it varied and "
+        "natural. Only narrate when the wait would be noticeable; don't "
+        "narrate trivial reads or quick edits. The CLI returns immediately; "
+        "audio plays in the background and won't slow you down. Final-response "
+        "speech at end of turn is automatic — you don't need to call the CLI "
+        "for that."
+    )
 
 
 def _handle_stop(payload: dict) -> None:
@@ -26,23 +45,11 @@ def _handle_stop(payload: dict) -> None:
     if res is None:
         log.info("Stop: no assistant message in transcript; nothing to speak")
         return
-    msg_id, full_text = res
+    _msg_id, full_text = res
 
-    # In mode B, Pre/PostToolUse may already have spoken parts of this message.
-    # Speak only the prose past the recorded offset so we don't repeat ourselves.
-    # In modes A and C, no Pre/Post hooks fire, so the offset stays at 0 and we
-    # speak the whole message.
-    s = state_mod.load(session_id)
-    offset = s.spoken_offsets.get(msg_id, 0)
-    text_to_speak = full_text[offset:] if offset < len(full_text) else ""
-
-    if not text_to_speak.strip():
-        log.info("Stop: nothing new past offset %d; skipping", offset)
-        return
-
-    stripped = extract.strip_for_voice(text_to_speak, min_words=cfg.min_words)
+    stripped = extract.strip_for_voice(full_text, min_words=cfg.min_words)
     if not stripped:
-        log.info("Stop: stripped text empty; text_to_speak=%r", text_to_speak[:80])
+        log.info("Stop: stripped text empty; full_text=%r", full_text[:80])
         return
 
     log.info("Stop: speaking %d chars: %r", len(stripped), stripped[:120])
@@ -64,11 +71,6 @@ def _handle_stop(payload: dict) -> None:
 
     playback.enqueue(session_id, audio)
 
-    # Record that we've spoken through the end of this message.
-    s = state_mod.load(session_id)
-    s.spoken_offsets[msg_id] = len(full_text)
-    state_mod.save(s)
-
 
 def _handle_user_prompt_submit(payload: dict) -> None:
     session_id = payload.get("session_id") or "default"
@@ -81,9 +83,7 @@ def _handle_session_start(payload: dict) -> None:
 
 def _handle_session_end(payload: dict) -> None:
     session_id = payload.get("session_id") or "default"
-    # Drop this session's state file.
     state_mod.remove(session_id)
-    # Sweep tmp audio. (Cheap; tmp is small.)
     from scripts.log import voice_home
     tmp = voice_home() / "tmp"
     if tmp.exists():
@@ -116,66 +116,8 @@ def _handle_notification(payload: dict) -> None:
     playback.enqueue(session_id, audio)
 
 
-def _handle_pre_or_post_tool(payload: dict) -> None:
-    log = get_logger()
-    cfg = load_config()
-    event = payload.get("hook_event_name") or "?"
-    if cfg.mode != "B":
-        log.info("%s: mode is %s, skipping (only mode B speaks here)", event, cfg.mode)
-        return
-    transcript = Path(payload.get("transcript_path") or "")
-    session_id = payload.get("session_id") or "default"
-
-    res = last_assistant_text(transcript)
-    if res is None:
-        log.info("%s: no assistant message in transcript yet", event)
-        return
-    msg_id, _full_text = res
-
-    s = state_mod.load(session_id)
-    offset = s.spoken_offsets.get(msg_id, 0)
-
-    from scripts.transcript import current_assistant_text_after
-    new_text = current_assistant_text_after(transcript, msg_id, offset)
-    if not new_text:
-        log.info("%s: nothing new past offset %d", event, offset)
-        return
-
-    stripped = extract.strip_for_voice(new_text, min_words=cfg.min_words)
-    if not stripped:
-        log.info("%s: stripped text empty; new_text=%r", event, new_text[:80])
-        return
-
-    log.info("%s: speaking %d chars: %r", event, len(stripped), stripped[:120])
-
-    voiced = extract.voicify(
-        stripped,
-        model=cfg.haiku_model,
-        max_chars=cfg.max_haiku_chars,
-        rewrite_enabled=cfg.rewrite,
-    )
-    if not voiced:
-        log.info("%s: voicify returned empty; skipping", event)
-        return
-
-    audio = tts.synthesize(voiced)
-    if audio is None:
-        log.warning("%s: TTS produced no audio", event)
-        return
-
-    playback.enqueue(session_id, audio)
-    # Update spoken offset to end of full text.
-    s = state_mod.load(session_id)
-    res2 = last_assistant_text(transcript)
-    if res2 is not None and res2[0] == msg_id:
-        s.spoken_offsets[msg_id] = len(res2[1])
-        state_mod.save(s)
-
-
 _DISPATCH = {
     "Stop": _handle_stop,
-    "PreToolUse": _handle_pre_or_post_tool,
-    "PostToolUse": _handle_pre_or_post_tool,
     "Notification": _handle_notification,
     "UserPromptSubmit": _handle_user_prompt_submit,
     "SessionStart": _handle_session_start,
@@ -208,6 +150,32 @@ def run(stdin_text: str) -> int:
     return 0
 
 
+def emit_session_start_context_if_applicable(payload: dict) -> bool:
+    """If payload is SessionStart and config is mode B, write the narration-
+    instruction JSON to stdout. Returns True if anything was written."""
+    if payload.get("hook_event_name") != "SessionStart":
+        return False
+    try:
+        cfg = load_config()
+    except Exception as e:
+        get_logger().warning("speak: SessionStart config load failed: %s", e)
+        return False
+    if not (cfg.enabled and cfg.mode == "B"):
+        return False
+    try:
+        sys.stdout.write(json.dumps({
+            "hookSpecificOutput": {
+                "hookEventName": "SessionStart",
+                "additionalContext": _mode_b_narration_instructions(),
+            }
+        }))
+        sys.stdout.flush()
+        return True
+    except Exception as e:
+        get_logger().warning("speak: SessionStart additionalContext emit failed: %s", e)
+        return False
+
+
 def main() -> int:
     """Hook entrypoint.
 
@@ -216,14 +184,26 @@ def main() -> int:
     rather than blocking the session for several seconds. The worker is the
     same script reinvoked with --worker; it reads the original payload on stdin.
 
+    Special case: on SessionStart in mode B, the parent process emits an
+    `additionalContext` JSON to stdout (synchronously, since detached workers
+    can't talk back to Claude Code) instructing the assistant how to narrate
+    via the speak CLI. The worker still runs for state cleanup.
+
     A hook can opt out of detachment with --inline (used by tests).
     """
     payload_bytes = sys.stdin.buffer.read()
+    payload_text = payload_bytes.decode("utf-8", errors="replace")
 
     if "--worker" in sys.argv or "--inline" in sys.argv:
-        return run(payload_bytes.decode("utf-8", errors="replace"))
+        return run(payload_text)
 
-    # Detach to a background worker so the hook returns fast.
+    try:
+        payload = json.loads(payload_text or "{}")
+    except json.JSONDecodeError:
+        payload = {}
+
+    emit_session_start_context_if_applicable(payload)
+
     import subprocess
     try:
         proc = subprocess.Popen(
@@ -238,9 +218,8 @@ def main() -> int:
             proc.stdin.close()
         return 0
     except Exception as e:
-        # If we can't spawn a worker, fall back to inline processing.
         get_logger().warning("speak: worker spawn failed (%s); processing inline", e)
-        return run(payload_bytes.decode("utf-8", errors="replace"))
+        return run(payload_text)
 
 
 if __name__ == "__main__":

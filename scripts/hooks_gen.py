@@ -4,9 +4,11 @@ import json
 from pathlib import Path
 
 OPERATIONAL_EVENTS = ("UserPromptSubmit", "SessionStart", "SessionEnd")
+# Mode B uses the same hooks as A; live narration in B is driven by the
+# assistant invoking scripts/speak_cli.py via Bash, not by hook scraping.
 MODE_EVENTS = {
     "A": ("Stop",),
-    "B": ("Stop", "PreToolUse", "PostToolUse"),
+    "B": ("Stop",),
     "C": ("Stop", "Notification"),
 }
 

@@ -19,7 +19,6 @@ def state_dir() -> Path:
 @dataclass
 class SessionState:
     session_id: str
-    spoken_offsets: dict[str, int] = field(default_factory=dict)
     current_pid: int | None = None
     queue: list[str] = field(default_factory=list)  # paths of pending audio files
 
@@ -55,7 +54,6 @@ def load(session_id: str) -> SessionState:
 
     return SessionState(
         session_id=raw.get("session_id", session_id),
-        spoken_offsets=raw.get("spoken_offsets") or {},
         current_pid=raw.get("current_pid"),
         queue=raw.get("queue") or [],
     )

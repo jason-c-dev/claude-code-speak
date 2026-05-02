@@ -8,19 +8,8 @@ def test_create_and_read_state(voice_home: Path):
 
     s = state.load("session-abc")
     assert s.session_id == "session-abc"
-    assert s.spoken_offsets == {}
     assert s.current_pid is None
-
-
-def test_record_and_read_offset(voice_home: Path):
-    from scripts import state
-
-    s = state.load("session-abc")
-    s.spoken_offsets["msg-1"] = 120
-    state.save(s)
-
-    s2 = state.load("session-abc")
-    assert s2.spoken_offsets == {"msg-1": 120}
+    assert s.queue == []
 
 
 def test_set_and_clear_pid(voice_home: Path):
@@ -42,7 +31,7 @@ def test_remove_session(voice_home: Path):
     from scripts import state
 
     s = state.load("session-bye")
-    s.spoken_offsets["m"] = 1
+    s.queue = ["/tmp/a.mp3"]
     state.save(s)
     assert (voice_home / "state" / "session-bye.json").exists()
 
@@ -77,24 +66,22 @@ def test_corrupt_state_file_resets(voice_home: Path):
     p.write_text("{not json")
     s = state.load("broken")
     assert s.session_id == "broken"
-    assert s.spoken_offsets == {}
     assert s.current_pid is None
+    assert s.queue == []
 
 
 def test_save_load_round_trip_of_queue(voice_home: Path):
-    """The queue field round-trips through save/load."""
+    """The queue and pid fields round-trip through save/load."""
     from scripts import state
 
     s = state.load("with-queue")
     s.queue = ["/tmp/a.mp3", "/tmp/b.mp3"]
     s.current_pid = 7777
-    s.spoken_offsets["m1"] = 42
     state.save(s)
 
     s2 = state.load("with-queue")
     assert s2.queue == ["/tmp/a.mp3", "/tmp/b.mp3"]
     assert s2.current_pid == 7777
-    assert s2.spoken_offsets == {"m1": 42}
 
 
 def test_save_does_not_raise_on_oserror(voice_home: Path, monkeypatch):
@@ -103,7 +90,7 @@ def test_save_does_not_raise_on_oserror(voice_home: Path, monkeypatch):
     from scripts import state
 
     s = state.load("rb")
-    s.spoken_offsets["x"] = 1
+    s.queue = ["/tmp/x.mp3"]
 
     def explode(*args, **kwargs):
         raise OSError("disk full")
@@ -119,11 +106,11 @@ def test_save_is_atomic_no_torn_writes(voice_home: Path):
     from scripts import state
 
     s = state.load("atomic")
-    s.spoken_offsets["m"] = 99
+    s.queue = ["/tmp/q.mp3"]
     state.save(s)
 
     raw = json.loads((voice_home / "state" / "atomic.json").read_text())
-    assert raw["spoken_offsets"] == {"m": 99}
+    assert raw["queue"] == ["/tmp/q.mp3"]
 
 
 def test_session_id_with_path_traversal_is_pinned(voice_home: Path):
@@ -131,7 +118,7 @@ def test_session_id_with_path_traversal_is_pinned(voice_home: Path):
     from scripts import state
 
     s = state.load("../escape")
-    s.spoken_offsets["x"] = 1
+    s.queue = ["/tmp/y.mp3"]
     state.save(s)
 
     state_files = list((voice_home / "state").glob("*.json"))

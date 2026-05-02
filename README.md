@@ -6,7 +6,7 @@ A Claude Code plugin that gives Claude a spoken voice. The natural-language part
 
 ## What it does
 
-- Hooks into Claude Code's `Stop` event (and optionally `PreToolUse` / `PostToolUse` / `Notification`) to extract the speakable prose from each turn.
+- Hooks into Claude Code's `Stop` event (and optionally `Notification`) to extract the speakable prose from each turn.
 - Strips code blocks, file paths, URLs, and markdown formatting so only natural sentences remain.
 - Runs the result through Claude Haiku 4.5 to polish into one or two natural-sounding spoken sentences.
 - Sends the polished text to Deepgram Aura-2 for high-quality TTS, with `say` as a local fallback if Deepgram is unconfigured or unreachable.
@@ -16,11 +16,11 @@ A Claude Code plugin that gives Claude a spoken voice. The natural-language part
 
 | Mode | When Claude speaks |
 |---|---|
-| **A** (default) | Final response only — one clip per turn. |
-| **B** | Live commentary — speaks each prose chunk between tool calls plus the final summary. |
+| **A** (default) | Final response only — one clip per turn. Fully hook-driven and deterministic. |
+| **B** | Same as A, plus Claude narrates short cues ("Looking that up", "Pulling it up") before tool calls by invoking a CLI from Bash. End-of-turn speech is deterministic; pre-tool cues are best-effort (Claude has to remember to call the CLI). |
 | **C** | Final response plus distinct alerts when Claude hits a `Notification` event (asks for permission, signals a blocker, etc.). |
 
-Mode is set via `config.json`. The setup skill regenerates `hooks/hooks.json` so only the hooks for the current mode are registered.
+Mode is set via `config.json`. The setup skill regenerates `hooks/hooks.json` so only the hooks for the current mode are registered. In mode B, a `SessionStart` hook injects narration instructions into Claude's session context so it knows when and how to call the speak CLI.
 
 ## Requirements
 

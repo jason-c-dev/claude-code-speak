@@ -64,21 +64,3 @@ def last_assistant_text(transcript_path: Path) -> tuple[str, str] | None:
     return (last_id, " ".join(parts))
 
 
-def current_assistant_text_after(
-    transcript_path: Path, message_id: str, offset: int
-) -> str:
-    """Return the concatenated text of the last assistant message past `offset`.
-
-    If `message_id` doesn't match the last message's id, returns the full text
-    starting from offset 0 (treat as a new message)."""
-    res = last_assistant_text(transcript_path)
-    if res is None:
-        return ""
-    last_id, text = res
-    if last_id != message_id:
-        return text
-    if offset <= 0:
-        return text
-    if offset >= len(text):
-        return ""
-    return text[offset:]

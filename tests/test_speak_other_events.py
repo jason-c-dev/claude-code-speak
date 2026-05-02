@@ -91,70 +91,77 @@ def test_notification_skipped_in_mode_A(voice_home, plugin_root, write_config, m
                           "message": "x"}))
 
 
-# --- Pre/PostToolUse (mode B) ---
+# --- PreToolUse / PostToolUse: removed in favor of speak_cli (mode B narration is
+# Bash-driven by the assistant, not hook-scraped). The hooks no longer dispatch
+# either event. Tests for the speak CLI live in test_speak_cli.py.
 
-def test_pretooluse_speaks_text_since_last_offset_in_mode_B(voice_home, plugin_root,
-                                                              write_config, monkeypatch, tmp_path):
+
+# --- SessionStart additionalContext (mode B narration instructions) ---
+
+def test_sessionstart_emits_additional_context_in_mode_b(
+    voice_home, plugin_root, write_config, capsys
+):
+    """In mode B, SessionStart emits a hookSpecificOutput.additionalContext block
+    on stdout so each fresh Claude Code session learns to invoke the speak CLI."""
     write_config({"enabled": True, "mode": "B"})
-    transcript = tmp_path / "session.jsonl"
-    _write_jsonl(transcript, [
-        {"type": "assistant", "message": {"id": "m1", "content": [
-            {"type": "text", "text": "Looking at the file now to find the bug."},
-            {"type": "tool_use", "name": "Read"},
-        ]}},
-    ])
+    from scripts import speak
 
-    from scripts import speak, extract, tts, playback, state as state_mod
-
-    captured = {}
-    async def fake_voicify(text, model):
-        captured["text"] = text
-        return "voiced"
-    monkeypatch.setattr(extract, "_voicify_async", fake_voicify)
-    fake = voice_home / "tmp" / "p.mp3"
-    fake.parent.mkdir(parents=True, exist_ok=True)
-    fake.write_bytes(b"x")
-    monkeypatch.setattr(tts, "synthesize", lambda text: fake)
-    enqueued = []
-    monkeypatch.setattr(playback, "enqueue", lambda s, p: enqueued.append((s, p)))
-
-    payload = {"session_id": "S", "transcript_path": str(transcript),
-               "hook_event_name": "PreToolUse"}
-    speak.run(json.dumps(payload))
-    assert enqueued == [("S", fake)]
-    assert "Looking at the file" in captured["text"]
-
-    # Offset should now be at end of that text.
-    s = state_mod.load("S")
-    assert s.spoken_offsets["m1"] == len("Looking at the file now to find the bug.")
+    wrote = speak.emit_session_start_context_if_applicable(
+        {"hook_event_name": "SessionStart"}
+    )
+    assert wrote is True
+    out = capsys.readouterr().out
+    assert "hookSpecificOutput" in out
+    assert "additionalContext" in out
+    assert "speak_cli.py" in out
 
 
-def test_pretooluse_skipped_in_mode_A(voice_home, plugin_root, write_config, monkeypatch):
+def test_sessionstart_emits_nothing_in_mode_a(
+    voice_home, plugin_root, write_config, capsys
+):
     write_config({"enabled": True, "mode": "A"})
-    from scripts import speak, tts
+    from scripts import speak
 
-    monkeypatch.setattr(tts, "synthesize", lambda text: pytest.fail("should not synth"))
-    speak.run(json.dumps({"session_id": "S", "transcript_path": "/x",
-                          "hook_event_name": "PreToolUse"}))
+    wrote = speak.emit_session_start_context_if_applicable(
+        {"hook_event_name": "SessionStart"}
+    )
+    assert wrote is False
+    assert capsys.readouterr().out == ""
 
 
-def test_pretooluse_skips_when_no_new_text(voice_home, plugin_root, write_config,
-                                             monkeypatch, tmp_path):
+def test_sessionstart_emits_nothing_in_mode_c(
+    voice_home, plugin_root, write_config, capsys
+):
+    write_config({"enabled": True, "mode": "C"})
+    from scripts import speak
+
+    wrote = speak.emit_session_start_context_if_applicable(
+        {"hook_event_name": "SessionStart"}
+    )
+    assert wrote is False
+    assert capsys.readouterr().out == ""
+
+
+def test_sessionstart_emits_nothing_when_disabled(
+    voice_home, plugin_root, write_config, capsys
+):
+    write_config({"enabled": False, "mode": "B"})
+    from scripts import speak
+
+    wrote = speak.emit_session_start_context_if_applicable(
+        {"hook_event_name": "SessionStart"}
+    )
+    assert wrote is False
+
+
+def test_sessionstart_emits_nothing_for_other_events(
+    voice_home, plugin_root, write_config, capsys
+):
     write_config({"enabled": True, "mode": "B"})
-    from scripts import speak, tts, state as state_mod
+    from scripts import speak
 
-    transcript = tmp_path / "session.jsonl"
-    _write_jsonl(transcript, [
-        {"type": "assistant", "message": {"id": "m1", "content": [
-            {"type": "text", "text": "Already spoken."},
-            {"type": "tool_use", "name": "Read"},
-        ]}},
-    ])
-
-    s = state_mod.load("S")
-    s.spoken_offsets["m1"] = len("Already spoken.")
-    state_mod.save(s)
-
-    monkeypatch.setattr(tts, "synthesize", lambda text: pytest.fail("should not synth"))
-    speak.run(json.dumps({"session_id": "S", "transcript_path": str(transcript),
-                          "hook_event_name": "PreToolUse"}))
+    wrote = speak.emit_session_start_context_if_applicable(
+        {"hook_event_name": "Stop"}
+    )
+    assert wrote is False
+    assert capsys.readouterr().out == ""

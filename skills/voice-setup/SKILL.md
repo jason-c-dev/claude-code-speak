@@ -99,12 +99,16 @@ import subprocess; subprocess.run(['afplay', str(p)])
 
 Ask: "Which mode?
 
-- **A (default)** — Claude speaks only the final response of each turn.
-- **B** — Live commentary: Claude speaks each prose chunk between tool calls plus the
-  final summary.
+- **A (default)** — Claude speaks only the final response of each turn (deterministic,
+  hook-driven).
+- **B** — Same as A, plus Claude narrates short cues before tool calls (e.g.
+  'Looking that up') by invoking the speak CLI from Bash. The pre-tool
+  narration depends on Claude remembering to call it, so coverage isn't
+  guaranteed; the end-of-turn speech is.
 - **C** — Final response plus distinct alerts when Claude needs your attention.
 
-(A is the safe default. B is more 'alive' but can stack up. Try A first.)"
+(A is the safe default. B is more 'alive' but the pre-tool cues are best-effort.
+Try A first.)"
 
 ## Step 5 — Write config.json
 
