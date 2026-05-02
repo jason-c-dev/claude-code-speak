@@ -1,0 +1,141 @@
+# Claude Voice
+
+A Claude Code plugin that gives Claude a spoken voice. The natural-language parts of Claude's responses are spoken aloud through Deepgram Aura-2 (with macOS `say` as a local fallback). Code, tool calls, file paths, and other non-prose are filtered out.
+
+> Status: design phase. The spec lives at [`docs/superpowers/specs/2026-05-02-claude-voice-design.md`](docs/superpowers/specs/2026-05-02-claude-voice-design.md). Implementation lands in subsequent commits.
+
+## What it does
+
+- Hooks into Claude Code's `Stop` event (and optionally `PreToolUse` / `PostToolUse` / `Notification`) to extract the speakable prose from each turn.
+- Strips code blocks, file paths, URLs, and markdown formatting so only natural sentences remain.
+- Runs the result through Claude Haiku 4.5 to polish into one or two natural-sounding spoken sentences.
+- Sends the polished text to Deepgram Aura-2 for high-quality TTS, with `say` as a local fallback if Deepgram is unconfigured or unreachable.
+- Plays the audio with `afplay`. Audio from a prior turn is killed the moment you send a new prompt.
+
+## Modes
+
+| Mode | When Claude speaks |
+|---|---|
+| **A** (default) | Final response only — one clip per turn. |
+| **B** | Live commentary — speaks each prose chunk between tool calls plus the final summary. |
+| **C** | Final response plus distinct alerts when Claude hits a `Notification` event (asks for permission, signals a blocker, etc.). |
+
+Mode is set via `config.json`. The setup skill regenerates `hooks/hooks.json` so only the hooks for the current mode are registered.
+
+## Requirements
+
+- macOS (the `say` fallback is Darwin-only)
+- Python 3.10+
+- [Claude Code](https://claude.com/claude-code) with a Max plan (so the Haiku rewrite step is free)
+- Optional but recommended: a [Deepgram](https://deepgram.com) API key (free tier works; Aura-2 voices are well above `say` quality)
+
+## Install
+
+This plugin currently lives as a local repository. Once published to a marketplace, install will be a one-liner.
+
+For now:
+
+```bash
+# clone (or `cd` into wherever you have this repo)
+git clone <this-repo-url> ~/dev/claude-chat
+cd ~/dev/claude-chat
+
+# inside Claude Code, install the local plugin
+/plugin install /Users/$USER/dev/claude-chat
+/reload-plugins
+```
+
+Then ask Claude to set it up:
+
+```
+> set up voice
+```
+
+The setup skill walks you through installing the Python dependency (`claude-agent-sdk`), entering your Deepgram key (or skipping for `say`-only mode), picking a voice, picking a mode, and running a smoke test. About a minute, end to end.
+
+## Configuration
+
+Plugin-level config lives in `config.json` at the repo root. The setup skill regenerates this — you shouldn't normally edit it by hand. Example:
+
+```json
+{
+  "enabled": true,
+  "mode": "A",
+  "voice": "aura-2-thalia-en",
+  "primary_tts": "deepgram",
+  "fallback_tts": "say",
+  "rewrite": true,
+  "speech_rate": 1.0
+}
+```
+
+Your Deepgram key lives **outside the repo** at `~/.claude/voice/.env`:
+
+```
+DEEPGRAM_API_KEY=...
+```
+
+This survives plugin reinstall and never lands in version control.
+
+To change voice or mode later, just say `change voice` or `change voice mode` and re-run the setup flow.
+
+To temporarily mute Claude:
+
+```bash
+echo '{"enabled": false}' | jq -s '.[0] * .[1]' config.json - > /tmp/c.json && mv /tmp/c.json config.json
+```
+
+(Or simply uninstall the plugin via `/plugin uninstall`.)
+
+## How "vocal intent" is decided
+
+You don't write speech tags. The plugin extracts speech in three steps:
+
+1. **Strip** — drop code blocks, inline code, file paths, URLs, markdown, emoji.
+2. **Rewrite** — pass the stripped text through Claude Haiku 4.5 with a prompt that says: "rewrite as one or two natural spoken sentences, or return empty if there's nothing worth saying aloud."
+3. **Synthesize** — Aura-2 turns it into audio.
+
+Haiku returning the empty string is a valid signal — Claude says nothing aloud for that turn. Pure tool-use turns naturally produce nothing speakable and stay silent.
+
+## Failure behavior
+
+Every failure mode is "log and silent skip". The plugin will not block your session, throw errors back into Claude Code, or partially break a turn. Worst case: Claude doesn't speak. Logs go to `~/.claude/voice/voice.log` for diagnosis.
+
+Common fallbacks:
+
+| Situation | What happens |
+|---|---|
+| No Deepgram key configured | Speak via `say` instead |
+| Deepgram 5xx or timeout | Fall through to `say` |
+| Haiku auth fails | Speak the heuristic-stripped text raw |
+| Stripped text is empty | Stay silent for this turn |
+| Audio device unavailable | Log and stay silent |
+
+## Filesystem layout
+
+```
+~/.claude/voice/
+├── .env                       # DEEPGRAM_API_KEY
+├── voice.log                  # diagnostic log
+├── state/<session_id>.json    # per-session state (offsets, current pid)
+└── tmp/<uuid>.{mp3,aiff}      # transient audio, deleted after playback
+```
+
+The plugin repo itself contains code, hooks, the setup skill, the spec, and example config. No user data lives in the repo.
+
+## Privacy
+
+- Stripped + rewritten text is sent to Deepgram (TTS) and to Anthropic (Haiku rewrite via the Claude Agent SDK, billed against your Max plan).
+- The full transcript is **not** sent to either — the plugin only reads what's needed for the current event.
+- Audio files are local. They're deleted after playback and on session end.
+
+## Roadmap (post-v1)
+
+- Streaming TTS playback (start audio before synthesis completes).
+- Linux/Windows fallback (replace `say` with `espeak-ng` or Piper).
+- A `/voice mute` slash command for quick toggling.
+- Cost telemetry surfaced through the setup skill.
+
+## License
+
+TBD — pre-release.

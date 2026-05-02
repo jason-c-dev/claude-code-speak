@@ -120,11 +120,19 @@ Inputs over 4000 characters are truncated from the start (keep most recent prose
 
 Fallback chain:
 
-1. **Deepgram Aura-2** (primary). POST to `https://api.deepgram.com/v1/speak?model=<voice>&encoding=mp3` with `Authorization: Token <DEEPGRAM_API_KEY>`. Body: `{"text": voiced}`. Response body bytes are written to `~/.claude/voice/tmp/<uuid>.mp3`.
-2. **macOS `say`** (fallback). If Deepgram is unconfigured, returns 4xx/5xx, or times out, run `say -v <mapped_voice> -o <path>.aiff <voiced>`. The voice mapping (e.g. `aura-2-thalia-en` → `Samantha`) lives in config.
+1. **Deepgram Aura-2** (primary). `POST https://api.deepgram.com/v1/speak?model=<voice>&encoding=mp3` with header `Authorization: Token <DEEPGRAM_API_KEY>` (literal `Token`, not `Bearer`). Body: `{"text": voiced}`. Successful response is raw binary audio (`audio/mpeg`); error responses are JSON with non-200 status. Response bytes are written to `~/.claude/voice/tmp/<uuid>.mp3`.
+2. **macOS `say`** (fallback). If Deepgram is unconfigured, returns non-200, or times out, run `say -v <mapped_voice> -o <path>.aiff <voiced>`. The voice mapping (e.g. `aura-2-thalia-en` → `Samantha`) lives in config.
 3. **Silent skip** (last resort). If `say` is unavailable or fails (which would mean a broken macOS audio system), log and exit 0.
 
 Every fallback transition is logged to `~/.claude/voice/voice.log` for diagnostic surfacing in the setup skill.
+
+**Verified API constraints** (Deepgram Aura-2, fetched 2026-05-02 from `developers.deepgram.com/llms-full.txt`):
+
+- **Max input: 2000 characters per request.** Over that returns HTTP 413 with `{"err_msg": "Input text exceeds maximum character limit..."}`. Haiku rewrite output is typically 1–2 sentences (<500 chars), so this is rarely hit; if it ever is, `tts.synthesize` truncates to 2000 chars and logs.
+- **MP3 sample rate is locked to 22050 Hz.** Only `bit_rate` (32000 or 48000, default 48000) is tunable for mp3.
+- **Optional `speed` query param** (range 0.7–1.5, default 1.0) is exposed in `config.json` as `"speech_rate"` for users who want faster/slower playback.
+- Concurrency on Pay-As-You-Go is ~15 simultaneous REST requests — well above what a single user session generates.
+- Aura-2 voice IDs follow the pattern `aura-2-<name>-<lang>` (e.g. `aura-2-thalia-en`, `aura-2-orion-en`, `aura-2-pandora-en`). The setup skill picks from a curated 6-voice subset; `config.voice` accepts any valid Aura-2 model ID.
 
 ### 5. Playback — `playback.enqueue(audio_path)`
 
@@ -155,7 +163,9 @@ Played audio files are deleted from `~/.claude/voice/tmp/` after playback. The d
   "rewrite": true,
   "haiku_model": "claude-haiku-4-5-20251001",
   "min_words": 3,
-  "max_haiku_chars": 4000
+  "max_haiku_chars": 4000,
+  "max_deepgram_chars": 2000,
+  "speech_rate": 1.0
 }
 ```
 
@@ -191,6 +201,8 @@ Re-running the skill at any time updates one or more of those steps (mode change
 |---|---|
 | Deepgram key missing or 401/403 | Fall back to `say`; log. |
 | Deepgram 5xx, timeout, network error | Fall back to `say`; log. |
+| Voiced text >2000 chars (Deepgram limit) | Truncate to 2000 chars before request; log. |
+| Deepgram returns 413 (limit hit despite truncate) | Fall back to `say`; log. |
 | `say` not on PATH or fails | Log; silent skip. |
 | Claude Agent SDK auth fails | Speak the heuristic-stripped text directly; log. |
 | Haiku rewrite returns empty | Skip TTS — correct signal. |
