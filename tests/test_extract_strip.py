@@ -65,3 +65,41 @@ def test_under_three_words_returns_empty():
 
 def test_three_or_more_words_passes():
     assert strip_for_voice("All tests passed now.") == "All tests passed now."
+
+
+def test_normalizes_temperature_units():
+    """`13°C` must be spoken as 'degrees Celsius', not eaten by the emoji strip."""
+    out = strip_for_voice("Houston is at 13°C and feels mild.")
+    assert "degrees Celsius" in out
+    assert "13C" not in out
+    assert "13" in out
+
+
+def test_normalizes_fahrenheit():
+    out = strip_for_voice("It is 80°F outside today.")
+    assert "degrees Fahrenheit" in out
+    assert "80F" not in out
+
+
+def test_normalizes_km_per_hour():
+    out = strip_for_voice("Wind at 18 km/h from the south.")
+    assert "kilometers per hour" in out
+    assert "km/h" not in out
+
+
+def test_normalizes_percent():
+    out = strip_for_voice("Confidence is 95% on this estimate.")
+    assert "percent" in out
+    assert "95%" not in out
+
+
+def test_normalizes_tilde_to_roughly():
+    out = strip_for_voice("Took ~5 minutes to finish the job.")
+    assert "roughly" in out
+    assert "~5" not in out
+
+
+def test_normalizes_ampersand_to_and():
+    out = strip_for_voice("Pull request from foo & bar today.")
+    assert " and " in out
+    assert "&" not in out

@@ -23,7 +23,30 @@ _BULLET_PREFIX = re.compile(r"^\s*[-*>]\s+", flags=re.MULTILINE)
 # 7. Whitespace collapse.
 _WHITESPACE = re.compile(r"\s+")
 
+# 8. Speech normalization: convert symbols/units to spoken words BEFORE
+#    the emoji strip eats them. Order matters — more-specific patterns first.
+_SPEECH_NORMALIZE = [
+    (re.compile(r"°\s*C\b"), " degrees Celsius"),
+    (re.compile(r"°\s*F\b"), " degrees Fahrenheit"),
+    (re.compile(r"°"), " degrees "),
+    (re.compile(r"\bkm/h\b"), " kilometers per hour"),
+    (re.compile(r"\bmph\b"), " miles per hour"),
+    (re.compile(r"\bkm\b"), " kilometers"),
+    (re.compile(r"\bcm\b"), " centimeters"),
+    (re.compile(r"\bmm\b"), " millimeters"),
+    (re.compile(r"~"), " roughly "),
+    (re.compile(r"&"), " and "),
+    (re.compile(r"%"), " percent"),
+]
+
 MIN_WORDS_DEFAULT = 3
+
+
+def _normalize_for_speech(s: str) -> str:
+    """Replace common symbols/units with spoken equivalents (before emoji strip)."""
+    for pattern, replacement in _SPEECH_NORMALIZE:
+        s = pattern.sub(replacement, s)
+    return s
 
 
 def _strip_emoji(s: str) -> str:
@@ -58,6 +81,7 @@ def strip_for_voice(text: str, min_words: int = MIN_WORDS_DEFAULT) -> str:
     s = _LONE_MARKER_LINE.sub(" ", s)
     s = _HR_LINE.sub(" ", s)
     s = _BULLET_PREFIX.sub("", s)
+    s = _normalize_for_speech(s)
     s = _strip_emoji(s)
     s = _WHITESPACE.sub(" ", s).strip()
 
