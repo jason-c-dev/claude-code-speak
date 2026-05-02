@@ -14,6 +14,12 @@ import subprocess
 import sys
 from pathlib import Path
 
+# Bootstrap: when invoked directly as a child process, plugin root isn't on
+# sys.path yet. Inject it so `from scripts import ...` works.
+_PLUGIN_ROOT = str(Path(__file__).resolve().parent.parent)
+if _PLUGIN_ROOT not in sys.path:
+    sys.path.insert(0, _PLUGIN_ROOT)
+
 from scripts.log import get_logger
 from scripts import state as state_mod
 
@@ -37,9 +43,11 @@ def enqueue(session_id: str, audio_path: Path) -> None:
         return
 
     # Spawn a fresh player process pointed at this session.
+    # Invoke the script directly (not -m) so it works regardless of PYTHONPATH;
+    # playback.py bootstraps its own sys.path at module-top.
     try:
         child = subprocess.Popen(
-            [sys.executable, "-m", "scripts.playback", "--player", session_id],
+            [sys.executable, str(Path(__file__).resolve()), "--player", session_id],
             stdout=subprocess.DEVNULL,
             stderr=subprocess.DEVNULL,
             start_new_session=True,

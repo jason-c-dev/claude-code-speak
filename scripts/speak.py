@@ -1,9 +1,15 @@
 """Hook entrypoint. Reads hook event JSON on stdin, dispatches by event."""
 from __future__ import annotations
-import json
 import sys
 from pathlib import Path
 
+# Bootstrap: when invoked directly by Claude Code as a hook script, the
+# plugin root isn't on sys.path. Inject it so `from scripts import ...` works.
+_PLUGIN_ROOT = str(Path(__file__).resolve().parent.parent)
+if _PLUGIN_ROOT not in sys.path:
+    sys.path.insert(0, _PLUGIN_ROOT)
+
+import json
 from scripts import extract, playback, state as state_mod, tts
 from scripts.config import load as load_config
 from scripts.log import get_logger
