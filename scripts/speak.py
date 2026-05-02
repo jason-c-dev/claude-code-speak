@@ -26,9 +26,21 @@ def _handle_stop(payload: dict) -> None:
     if res is None:
         log.info("Stop: no assistant message in transcript; nothing to speak")
         return
-    msg_id, text = res
+    msg_id, full_text = res
 
-    stripped = extract.strip_for_voice(text, min_words=cfg.min_words)
+    # In mode B, Pre/PostToolUse may already have spoken parts of this message.
+    # Speak only the prose past the recorded offset so we don't repeat ourselves.
+    # In modes A and C, no Pre/Post hooks fire, so the offset stays at 0 and we
+    # speak the whole message.
+    s = state_mod.load(session_id)
+    offset = s.spoken_offsets.get(msg_id, 0)
+    text_to_speak = full_text[offset:] if offset < len(full_text) else ""
+
+    if not text_to_speak.strip():
+        log.info("Stop: nothing new past offset %d; skipping", offset)
+        return
+
+    stripped = extract.strip_for_voice(text_to_speak, min_words=cfg.min_words)
     if not stripped:
         log.info("Stop: stripped text empty; skipping")
         return
@@ -52,7 +64,7 @@ def _handle_stop(payload: dict) -> None:
 
     # Record that we've spoken through the end of this message.
     s = state_mod.load(session_id)
-    s.spoken_offsets[msg_id] = len(text)
+    s.spoken_offsets[msg_id] = len(full_text)
     state_mod.save(s)
 
 
