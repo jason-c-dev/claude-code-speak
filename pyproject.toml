@@ -1,0 +1,15 @@
+[project]
+name = "claude-voice"
+version = "0.1.0"
+description = "Give Claude a voice — Claude Code plugin"
+requires-python = ">=3.10"
+dependencies = [
+    "claude-agent-sdk>=0.1.0",
+]
+
+[project.optional-dependencies]
+test = ["pytest>=7.0"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+pythonpath = ["."]
