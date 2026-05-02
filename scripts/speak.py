@@ -78,12 +78,18 @@ def _handle_stop(payload: dict) -> None:
         log.info("Stop: voicify returned empty; skipping")
         return
 
-    audio = tts.synthesize(voiced)
-    if audio is None:
-        log.warning("Stop: TTS produced no audio; skipping")
-        return
-
-    playback.enqueue(session_id, audio)
+    # Chunk into sentence-sized pieces so the first audio starts playing
+    # while later chunks are still synthesizing. Net effect: time-to-first-
+    # audio drops from ~full-text-synth to ~first-sentence-synth.
+    chunks = extract.split_into_chunks(voiced)
+    log.info("Stop: synthesizing %d chunk(s)", len(chunks))
+    for i, chunk in enumerate(chunks):
+        audio = tts.synthesize(chunk)
+        if audio is None:
+            log.warning("Stop: TTS produced no audio for chunk %d/%d; continuing",
+                        i + 1, len(chunks))
+            continue
+        playback.enqueue(session_id, audio)
 
 
 def _handle_user_prompt_submit(payload: dict) -> None:

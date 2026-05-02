@@ -42,6 +42,55 @@ _SPEECH_NORMALIZE = [
 MIN_WORDS_DEFAULT = 3
 
 
+# Sentence boundary: end-punctuation followed by whitespace (and ideally a
+# capital, but we don't enforce that strictly — handles ellipses-before-cap too).
+_SENTENCE_BOUNDARY = re.compile(r"(?<=[.!?])\s+")
+
+
+def split_into_chunks(
+    text: str,
+    *,
+    max_chars: int = 300,
+    min_chars: int = 60,
+) -> list[str]:
+    """Split text into chunks suitable for streaming TTS playback.
+
+    Each chunk is sized so the first one synthesizes quickly (low time-to-first-
+    audio) while the rest queue up behind. Splits on sentence boundaries, then
+    greedily packs sentences into chunks no larger than `max_chars`. Tiny
+    trailing chunks (< `min_chars`) get merged back into the previous chunk so
+    we don't end with a 5-character clip nobody will notice.
+
+    Returns a list of non-empty strings. For very short input the list has
+    exactly one element."""
+    if not text or not text.strip():
+        return []
+
+    sentences = [s for s in _SENTENCE_BOUNDARY.split(text.strip()) if s]
+    if not sentences:
+        return [text.strip()]
+
+    chunks: list[str] = []
+    current = ""
+    for s in sentences:
+        if not current:
+            current = s
+        elif len(current) + 1 + len(s) <= max_chars:
+            current = f"{current} {s}"
+        else:
+            chunks.append(current)
+            current = s
+    if current:
+        chunks.append(current)
+
+    # Merge tiny trailing chunk back so we don't end on a stub.
+    if len(chunks) >= 2 and len(chunks[-1]) < min_chars:
+        chunks[-2] = chunks[-2] + " " + chunks[-1]
+        chunks.pop()
+
+    return chunks
+
+
 def _normalize_for_speech(s: str) -> str:
     """Replace common symbols/units with spoken equivalents (before emoji strip)."""
     for pattern, replacement in _SPEECH_NORMALIZE:

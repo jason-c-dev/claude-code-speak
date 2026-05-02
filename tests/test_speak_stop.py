@@ -148,6 +148,58 @@ def test_stop_falls_back_to_stripped_when_voicify_returns_empty(
     assert enqueued == [("x", fake)]
 
 
+def test_stop_chunks_long_text_into_multiple_enqueues(voice_home, plugin_root,
+                                                        write_config, monkeypatch, tmp_path):
+    """Long final responses are split into sentence-sized chunks and enqueued
+    one at a time so the first chunk starts playing while later ones are still
+    being synthesized."""
+    write_config({"enabled": True, "mode": "A", "rewrite": False})
+    transcript = tmp_path / "session.jsonl"
+    long_text = (
+        "This is the first sentence of a longer response that should clearly trigger chunking. "
+        "Here comes a second sentence carrying enough words to push past the threshold reliably. "
+        "And a third sentence that adds more substance to round things out toward the limit. "
+        "A fourth sentence keeps the pressure on the chunker for good measure. "
+        "Finally a fifth sentence to make absolutely certain we cross the boundary cleanly."
+    )
+    _write_jsonl(transcript, [
+        {"type": "assistant", "message": {"id": "m1", "content": [
+            {"type": "text", "text": long_text}
+        ]}},
+    ])
+    from scripts import speak, tts, playback, state as state_mod
+
+    s = state_mod.load("abc")
+    s.interactive = True
+    state_mod.save(s)
+    state_mod.set_active_session("abc")
+
+    synth_calls = []
+    def fake_synth(text):
+        synth_calls.append(text)
+        # Fresh tmp file per chunk so enqueue treats them as distinct.
+        p = voice_home / "tmp" / f"chunk-{len(synth_calls)}.mp3"
+        p.parent.mkdir(parents=True, exist_ok=True)
+        p.write_bytes(b"x")
+        return p
+    monkeypatch.setattr(tts, "synthesize", fake_synth)
+    enqueued = []
+    monkeypatch.setattr(playback, "enqueue",
+                        lambda sid, path: enqueued.append((sid, path)))
+
+    payload = {"session_id": "abc", "transcript_path": str(transcript),
+               "hook_event_name": "Stop"}
+    speak.run(json.dumps(payload))
+
+    # Should have synthesized AND enqueued multiple times.
+    assert len(synth_calls) >= 2, f"expected multiple chunks, got {len(synth_calls)}"
+    assert len(enqueued) == len(synth_calls)
+    # Every enqueue is for the same session.
+    assert all(sid == "abc" for sid, _ in enqueued)
+    # First chunk contains start of text.
+    assert "first sentence" in synth_calls[0]
+
+
 def test_stop_skipped_when_session_is_not_active(voice_home, plugin_root,
                                                    write_config, monkeypatch, tmp_path):
     """When a second Claude Code window has more recently received a prompt,
