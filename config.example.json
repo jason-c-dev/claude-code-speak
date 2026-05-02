@@ -1,0 +1,17 @@
+{
+  "enabled": true,
+  "mode": "A",
+  "voice": "aura-2-thalia-en",
+  "primary_tts": "deepgram",
+  "fallback_tts": "say",
+  "rewrite": true,
+  "haiku_model": "claude-haiku-4-5-20251001",
+  "min_words": 3,
+  "max_haiku_chars": 4000,
+  "max_deepgram_chars": 2000,
+  "speech_rate": 1.0,
+  "say_voice_map": {
+    "aura-2-thalia-en": "Samantha",
+    "aura-2-orion-en": "Alex"
+  }
+}
