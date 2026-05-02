@@ -23,7 +23,7 @@ _BULLET_PREFIX = re.compile(r"^\s*[-*>]\s+", flags=re.MULTILINE)
 # 7. Whitespace collapse.
 _WHITESPACE = re.compile(r"\s+")
 
-MIN_WORDS_DEFAULT = 2
+MIN_WORDS_DEFAULT = 3
 
 
 def _strip_emoji(s: str) -> str:

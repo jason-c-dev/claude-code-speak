@@ -23,7 +23,7 @@ def test_drops_bare_urls():
 
 def test_flattens_markdown_emphasis():
     assert strip_for_voice("**bold** and *italic* text") == "bold and italic text"
-    assert strip_for_voice("_underscore_ words") == "underscore words"
+    assert strip_for_voice("_underscore_ words remain visible") == "underscore words remain visible"
 
 
 def test_drops_header_only_lines():
@@ -33,8 +33,8 @@ def test_drops_header_only_lines():
 
 def test_drops_lone_bullet_markers():
     # An empty bullet line with nothing meaningful should disappear.
-    text = "Intro\n\n-\n\nOutro"
-    assert strip_for_voice(text) == "Intro Outro"
+    text = "Intro line\n\n-\n\nOutro line"
+    assert strip_for_voice(text) == "Intro line Outro line"
 
 
 def test_keeps_bullet_content_as_prose():
