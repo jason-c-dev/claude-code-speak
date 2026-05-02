@@ -42,8 +42,10 @@ def _handle_stop(payload: dict) -> None:
 
     stripped = extract.strip_for_voice(text_to_speak, min_words=cfg.min_words)
     if not stripped:
-        log.info("Stop: stripped text empty; skipping")
+        log.info("Stop: stripped text empty; text_to_speak=%r", text_to_speak[:80])
         return
+
+    log.info("Stop: speaking %d chars: %r", len(stripped), stripped[:120])
 
     voiced = extract.voicify(
         stripped,
@@ -115,14 +117,18 @@ def _handle_notification(payload: dict) -> None:
 
 
 def _handle_pre_or_post_tool(payload: dict) -> None:
+    log = get_logger()
     cfg = load_config()
+    event = payload.get("hook_event_name") or "?"
     if cfg.mode != "B":
+        log.info("%s: mode is %s, skipping (only mode B speaks here)", event, cfg.mode)
         return
     transcript = Path(payload.get("transcript_path") or "")
     session_id = payload.get("session_id") or "default"
 
     res = last_assistant_text(transcript)
     if res is None:
+        log.info("%s: no assistant message in transcript yet", event)
         return
     msg_id, _full_text = res
 
@@ -132,11 +138,15 @@ def _handle_pre_or_post_tool(payload: dict) -> None:
     from scripts.transcript import current_assistant_text_after
     new_text = current_assistant_text_after(transcript, msg_id, offset)
     if not new_text:
+        log.info("%s: nothing new past offset %d", event, offset)
         return
 
     stripped = extract.strip_for_voice(new_text, min_words=cfg.min_words)
     if not stripped:
+        log.info("%s: stripped text empty; new_text=%r", event, new_text[:80])
         return
+
+    log.info("%s: speaking %d chars: %r", event, len(stripped), stripped[:120])
 
     voiced = extract.voicify(
         stripped,
@@ -145,10 +155,12 @@ def _handle_pre_or_post_tool(payload: dict) -> None:
         rewrite_enabled=cfg.rewrite,
     )
     if not voiced:
+        log.info("%s: voicify returned empty; skipping", event)
         return
 
     audio = tts.synthesize(voiced)
     if audio is None:
+        log.warning("%s: TTS produced no audio", event)
         return
 
     playback.enqueue(session_id, audio)
