@@ -37,63 +37,6 @@ def _assistant_text_blocks(entry: dict) -> list[str]:
     return out
 
 
-def wait_for_settle(
-    path: Path,
-    *,
-    min_wait_ms: int = 300,
-    settle_ms: int = 150,
-    max_ms: int = 1500,
-    poll_ms: int = 50,
-) -> None:
-    """Wait `min_wait_ms` unconditionally, then block until the transcript file
-    size has been stable for `settle_ms` (or `max_ms` total elapses).
-
-    Stop sometimes fires before the model's final assistant text block has
-    been flushed to the JSONL — most reliably reproducible after a Skill tool
-    call, where the model resumes generating immediately and the new text
-    block is still in flight when the hook runs. Reading too early returns
-    the *previous* assistant message, which is then spoken in place of what
-    the user actually wanted to hear.
-
-    A pure stability check is not enough: at hook-fire time the file appears
-    quiescent because no writes have *yet* happened. The unconditional grace
-    window covers the typical flush lag; the settle phase then catches longer
-    bursts that exceed `min_wait_ms`.
-
-    The Stop worker is detached, so this delay does not block Claude Code's
-    hook return path. Bounded so a never-settling transcript still progresses.
-    """
-    if path is None:
-        return
-    try:
-        if not path.exists():
-            return
-    except OSError:
-        return
-
-    time.sleep(min_wait_ms / 1000.0)
-
-    try:
-        last_size = path.stat().st_size
-    except OSError:
-        return
-    deadline = time.monotonic() + max(max_ms - min_wait_ms, 0) / 1000.0
-    last_change = time.monotonic()
-    settle_seconds = settle_ms / 1000.0
-    poll_seconds = poll_ms / 1000.0
-    while time.monotonic() < deadline:
-        time.sleep(poll_seconds)
-        try:
-            size = path.stat().st_size
-        except OSError:
-            return
-        if size != last_size:
-            last_size = size
-            last_change = time.monotonic()
-        elif time.monotonic() - last_change >= settle_seconds:
-            return
-
-
 def wait_for_new_message(
     transcript_path: Path,
     last_spoken_id: str | None,
@@ -108,12 +51,12 @@ def wait_for_new_message(
     appears within the budget. None for `last_spoken_id` matches "speak the
     first message we see" — useful on a fresh session.
 
-    Replaces the older `wait_for_settle` approach: file size stability is not
-    a reliable signal because Claude Code sometimes writes the new assistant
-    message to JSONL *after* the Stop hook has run, in which case settle
-    detects nothing because nothing is happening yet. Anchoring on
-    "have we seen a NEW msg id" is the correct semantic — we only speak text
-    we haven't already spoken.
+    File-size-stability is not a reliable signal: Claude Code sometimes
+    writes the new assistant message to JSONL *after* the Stop hook has
+    run, so a stability check at hook-fire time sees a quiescent file
+    because nothing has happened yet. Anchoring on "have we seen a NEW
+    msg id" is the correct semantic — we only speak text we haven't
+    already spoken, and we wait for it to actually appear.
     """
     if transcript_path is None:
         return None
