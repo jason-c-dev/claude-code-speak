@@ -63,21 +63,20 @@ def test_cli_joins_multiple_args_into_one_phrase(voice_home, plugin_root,
                                                    write_config, monkeypatch):
     """If invoked without quotes, argv comes in as multiple words; join them."""
     write_config({"enabled": True, "mode": "B"})
-    from scripts import speak_cli, extract, tts, playback
+    from scripts import speak_cli, tts, playback
 
-    captured = {}
-    async def fake_voicify(text, model):
-        captured["text"] = text
-        return "voiced"
-    monkeypatch.setattr(extract, "_voicify_async", fake_voicify)
     fake = voice_home / "tmp" / "j.mp3"
     fake.parent.mkdir(parents=True, exist_ok=True)
     fake.write_bytes(b"x")
-    monkeypatch.setattr(tts, "synthesize", lambda text: fake)
+    synth_calls = []
+    def fake_synth(text):
+        synth_calls.append(text)
+        return fake
+    monkeypatch.setattr(tts, "synthesize", fake_synth)
     monkeypatch.setattr(playback, "enqueue", lambda s, p: None)
 
     speak_cli.main(["speak_cli.py", "--inline", "Looking", "that", "up"])
-    assert "Looking that up" in captured["text"]
+    assert any("Looking that up" in t for t in synth_calls)
 
 
 def test_cli_uses_latest_session_id(voice_home, plugin_root, write_config, monkeypatch):
@@ -109,6 +108,29 @@ def test_cli_uses_latest_session_id(voice_home, plugin_root, write_config, monke
     speak_cli.main(["speak_cli.py", "--inline", "On it now"])
     assert enqueued, "should have enqueued"
     assert enqueued[0][0] == "newer-session"
+
+
+def test_cli_bypasses_haiku_even_when_config_rewrite_is_true(
+    voice_home, plugin_root, write_config, monkeypatch
+):
+    """The CLI is for short, intentional cues. cfg.rewrite=True controls the Stop
+    hook's final-response polish but must NOT pull Haiku into pre-tool narration."""
+    write_config({"enabled": True, "mode": "B", "rewrite": True})
+    from scripts import speak_cli, extract, tts, playback
+
+    captured = {}
+    def fake_voicify(text, *, model, max_chars, rewrite_enabled):
+        captured["rewrite_enabled"] = rewrite_enabled
+        return text
+    monkeypatch.setattr(extract, "voicify", fake_voicify)
+    fake = voice_home / "tmp" / "x.mp3"
+    fake.parent.mkdir(parents=True, exist_ok=True)
+    fake.write_bytes(b"x")
+    monkeypatch.setattr(tts, "synthesize", lambda text: fake)
+    monkeypatch.setattr(playback, "enqueue", lambda s, p: None)
+
+    speak_cli.main(["speak_cli.py", "--inline", "Looking that up"])
+    assert captured.get("rewrite_enabled") is False
 
 
 def test_cli_skips_when_synthesis_fails(voice_home, plugin_root, write_config, monkeypatch):

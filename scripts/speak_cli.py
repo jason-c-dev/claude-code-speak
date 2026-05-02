@@ -63,11 +63,14 @@ def _run(text: str) -> int:
 
     log.info("speak_cli: speaking %d chars: %r", len(stripped), stripped[:120])
 
+    # CLI cues are short and intentional (the assistant chose the exact words);
+    # always bypass Haiku here so the cue is spoken verbatim and stays low-latency.
+    # cfg.rewrite governs the Stop hook's final-response polish only.
     voiced = extract.voicify(
         stripped,
         model=cfg.haiku_model,
         max_chars=cfg.max_haiku_chars,
-        rewrite_enabled=cfg.rewrite,
+        rewrite_enabled=False,
     )
     if not voiced:
         log.info("speak_cli: voicify returned empty; skipping")
