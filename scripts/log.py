@@ -23,18 +23,26 @@ def get_logger() -> logging.Logger:
     if _LOGGER is not None:
         return _LOGGER
 
-    home = voice_home()
-    home.mkdir(parents=True, exist_ok=True)
-    log_path = home / "voice.log"
-
     logger = logging.getLogger("claude_voice")
     logger.setLevel(logging.INFO)
     logger.propagate = False
+    # Drop any handlers from a prior partial init so we never double-attach.
+    for h in list(logger.handlers):
+        logger.removeHandler(h)
 
-    handler = logging.FileHandler(log_path, encoding="utf-8")
-    handler.setFormatter(logging.Formatter(
-        "%(asctime)s %(levelname)s %(name)s: %(message)s"
-    ))
+    handler: logging.Handler
+    try:
+        home = voice_home()
+        home.mkdir(parents=True, exist_ok=True)
+        handler = logging.FileHandler(home / "voice.log", encoding="utf-8")
+        handler.setFormatter(logging.Formatter(
+            "%(asctime)s %(levelname)s %(name)s: %(message)s"
+        ))
+    except OSError:
+        # Voice is a UX layer. If we can't open the log file, swallow the
+        # error and run without persistent logging rather than break the hook.
+        handler = logging.NullHandler()
+
     logger.addHandler(handler)
     _LOGGER = logger
     return logger
