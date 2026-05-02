@@ -16,25 +16,18 @@ def _mark_interactive(sid: str):
 def test_cli_speaks_when_mode_b(voice_home, plugin_root, write_config, monkeypatch):
     write_config({"enabled": True, "mode": "B"})
     _mark_interactive("S")
-    from scripts import speak_cli, extract, tts, playback
+    from scripts import speak_cli, extract, playback
 
     monkeypatch.setattr(extract, "_voicify_async",
                         lambda text, model: _async_return("Looking that up"))
-    fake = voice_home / "tmp" / "cue.mp3"
-    fake.parent.mkdir(parents=True, exist_ok=True)
-    fake.write_bytes(b"x")
-    synth_calls = []
-    def fake_synth(text):
-        synth_calls.append(text)
-        return fake
-    monkeypatch.setattr(tts, "synthesize", fake_synth)
     enqueued = []
-    monkeypatch.setattr(playback, "enqueue", lambda s, p: enqueued.append((s, p)))
+    monkeypatch.setattr(playback, "enqueue", lambda s, t: enqueued.append((s, t)))
 
     rc = speak_cli.main(["speak_cli.py", "--inline", "Looking that up"])
     assert rc == 0
-    assert synth_calls, "synthesize should have been called"
-    assert enqueued, "playback.enqueue should have been called"
+    assert enqueued, "playback.enqueue should have been called with text"
+    assert enqueued[0][1] == "Looking that up", \
+        "enqueue must receive the voiced text, not a synthesized audio path"
 
 
 def test_cli_short_circuits_when_internal_env_set(voice_home, plugin_root,
@@ -44,10 +37,8 @@ def test_cli_short_circuits_when_internal_env_set(voice_home, plugin_root,
     write_config({"enabled": True, "mode": "B"})
     _mark_interactive("S")
     monkeypatch.setenv("CLAUDE_VOICE_INTERNAL", "1")
-    from scripts import speak_cli, tts, playback
+    from scripts import speak_cli, playback
 
-    monkeypatch.setattr(tts, "synthesize",
-                        lambda text: pytest.fail("must not synth when internal"))
     monkeypatch.setattr(playback, "enqueue",
                         lambda *a, **kw: pytest.fail("must not enqueue when internal"))
     rc = speak_cli.main(["speak_cli.py", "--inline", "Looking that up"])
@@ -60,14 +51,13 @@ def test_cli_silent_when_no_interactive_session(voice_home, plugin_root,
     This prevents subagents from playing audio that stacks with the user's
     own session."""
     write_config({"enabled": True, "mode": "B"})
-    from scripts import speak_cli, tts, playback
+    from scripts import speak_cli, playback
 
     # Create state files but none flagged interactive — simulating subagent state.
     (voice_home / "state" / "subagent-1.json").write_text(
         '{"session_id": "subagent-1", "interactive": false, "queue": []}'
     )
 
-    monkeypatch.setattr(tts, "synthesize", lambda text: voice_home / "tmp" / "x.mp3")
     monkeypatch.setattr(playback, "enqueue",
                         lambda *a, **kw: pytest.fail("must not enqueue without interactive session"))
     rc = speak_cli.main(["speak_cli.py", "--inline", "Looking that up"])
@@ -77,10 +67,10 @@ def test_cli_silent_when_no_interactive_session(voice_home, plugin_root,
 def test_cli_silent_in_mode_a(voice_home, plugin_root, write_config, monkeypatch):
     write_config({"enabled": True, "mode": "A"})
     _mark_interactive("S")
-    from scripts import speak_cli, tts
+    from scripts import speak_cli, playback
 
-    monkeypatch.setattr(tts, "synthesize",
-                        lambda text: pytest.fail("should not synth in mode A"))
+    monkeypatch.setattr(playback, "enqueue",
+                        lambda *a, **kw: pytest.fail("should not enqueue in mode A"))
     rc = speak_cli.main(["speak_cli.py", "--inline", "Looking that up"])
     assert rc == 0
 
@@ -88,10 +78,10 @@ def test_cli_silent_in_mode_a(voice_home, plugin_root, write_config, monkeypatch
 def test_cli_silent_when_disabled(voice_home, plugin_root, write_config, monkeypatch):
     write_config({"enabled": False, "mode": "B"})
     _mark_interactive("S")
-    from scripts import speak_cli, tts
+    from scripts import speak_cli, playback
 
-    monkeypatch.setattr(tts, "synthesize",
-                        lambda text: pytest.fail("should not synth when disabled"))
+    monkeypatch.setattr(playback, "enqueue",
+                        lambda *a, **kw: pytest.fail("should not enqueue when disabled"))
     rc = speak_cli.main(["speak_cli.py", "--inline", "Looking that up"])
     assert rc == 0
 
@@ -99,10 +89,10 @@ def test_cli_silent_when_disabled(voice_home, plugin_root, write_config, monkeyp
 def test_cli_silent_with_empty_text(voice_home, plugin_root, write_config, monkeypatch):
     write_config({"enabled": True, "mode": "B"})
     _mark_interactive("S")
-    from scripts import speak_cli, tts
+    from scripts import speak_cli, playback
 
-    monkeypatch.setattr(tts, "synthesize",
-                        lambda text: pytest.fail("should not synth on empty text"))
+    monkeypatch.setattr(playback, "enqueue",
+                        lambda *a, **kw: pytest.fail("should not enqueue on empty text"))
     rc = speak_cli.main(["speak_cli.py", "--inline", ""])
     assert rc == 0
 
@@ -112,20 +102,13 @@ def test_cli_joins_multiple_args_into_one_phrase(voice_home, plugin_root,
     """If invoked without quotes, argv comes in as multiple words; join them."""
     write_config({"enabled": True, "mode": "B"})
     _mark_interactive("S")
-    from scripts import speak_cli, tts, playback
+    from scripts import speak_cli, playback
 
-    fake = voice_home / "tmp" / "j.mp3"
-    fake.parent.mkdir(parents=True, exist_ok=True)
-    fake.write_bytes(b"x")
-    synth_calls = []
-    def fake_synth(text):
-        synth_calls.append(text)
-        return fake
-    monkeypatch.setattr(tts, "synthesize", fake_synth)
-    monkeypatch.setattr(playback, "enqueue", lambda s, p: None)
+    enqueued = []
+    monkeypatch.setattr(playback, "enqueue", lambda s, t: enqueued.append((s, t)))
 
     speak_cli.main(["speak_cli.py", "--inline", "Looking", "that", "up"])
-    assert any("Looking that up" in t for t in synth_calls)
+    assert any("Looking that up" in t for _, t in enqueued)
 
 
 def test_cli_picks_latest_interactive_session(voice_home, plugin_root,
@@ -151,12 +134,8 @@ def test_cli_picks_latest_interactive_session(voice_home, plugin_root,
 
     monkeypatch.setattr(extract, "_voicify_async",
                         lambda text, model: _async_return("voiced"))
-    fake = voice_home / "tmp" / "s.mp3"
-    fake.parent.mkdir(parents=True, exist_ok=True)
-    fake.write_bytes(b"x")
-    monkeypatch.setattr(tts, "synthesize", lambda text: fake)
     enqueued = []
-    monkeypatch.setattr(playback, "enqueue", lambda s, p: enqueued.append((s, p)))
+    monkeypatch.setattr(playback, "enqueue", lambda s, t: enqueued.append((s, t)))
 
     speak_cli.main(["speak_cli.py", "--inline", "On it now"])
     assert enqueued, "should have enqueued"
@@ -171,32 +150,14 @@ def test_cli_bypasses_haiku_even_when_config_rewrite_is_true(
     hook's final-response polish but must NOT pull Haiku into pre-tool narration."""
     write_config({"enabled": True, "mode": "B", "rewrite": True})
     _mark_interactive("S")
-    from scripts import speak_cli, extract, tts, playback
+    from scripts import speak_cli, extract, playback
 
     captured = {}
     def fake_voicify(text, *, model, max_chars, rewrite_enabled):
         captured["rewrite_enabled"] = rewrite_enabled
         return text
     monkeypatch.setattr(extract, "voicify", fake_voicify)
-    fake = voice_home / "tmp" / "x.mp3"
-    fake.parent.mkdir(parents=True, exist_ok=True)
-    fake.write_bytes(b"x")
-    monkeypatch.setattr(tts, "synthesize", lambda text: fake)
-    monkeypatch.setattr(playback, "enqueue", lambda s, p: None)
+    monkeypatch.setattr(playback, "enqueue", lambda s, t: None)
 
     speak_cli.main(["speak_cli.py", "--inline", "Looking that up"])
     assert captured.get("rewrite_enabled") is False
-
-
-def test_cli_skips_when_synthesis_fails(voice_home, plugin_root, write_config, monkeypatch):
-    write_config({"enabled": True, "mode": "B"})
-    _mark_interactive("S")
-    from scripts import speak_cli, extract, tts, playback
-
-    monkeypatch.setattr(extract, "_voicify_async",
-                        lambda text, model: _async_return("voiced"))
-    monkeypatch.setattr(tts, "synthesize", lambda text: None)
-    monkeypatch.setattr(playback, "enqueue",
-                        lambda s, p: pytest.fail("enqueue should not run if synth failed"))
-    rc = speak_cli.main(["speak_cli.py", "--inline", "Trying this"])
-    assert rc == 0

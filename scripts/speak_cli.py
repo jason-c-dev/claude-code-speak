@@ -21,7 +21,7 @@ _PLUGIN_ROOT = str(Path(__file__).resolve().parent.parent)
 if _PLUGIN_ROOT not in sys.path:
     sys.path.insert(0, _PLUGIN_ROOT)
 
-from scripts import extract, playback, state as state_mod, tts
+from scripts import extract, playback, state as state_mod
 from scripts.config import load as load_config
 from scripts.log import get_logger, voice_home
 
@@ -98,16 +98,11 @@ def _run(text: str) -> int:
         log.info("speak_cli: voicify returned empty; skipping")
         return 0
 
-    audio = tts.synthesize(voiced)
-    if audio is None:
-        log.warning("speak_cli: TTS produced no audio; skipping")
-        return 0
-
     sid = _active_interactive_session_id()
     if sid is None:
         log.info("speak_cli: no active interactive session; skipping playback")
         return 0
-    playback.enqueue(sid, audio)
+    playback.enqueue(sid, voiced)
     return 0
 
 
