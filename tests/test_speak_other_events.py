@@ -32,6 +32,40 @@ def test_userpromptsubmit_clears_queue_and_kills_pid(voice_home, plugin_root,
     assert killed == ["S"]
 
 
+def test_userpromptsubmit_marks_session_interactive(voice_home, plugin_root,
+                                                     write_config, monkeypatch):
+    """UserPromptSubmit is the only signal that a real human is driving this
+    session. Stop and Notification later check this flag to filter out
+    subagent/programmatic sessions."""
+    write_config({"enabled": True, "mode": "A"})
+    from scripts import speak, playback, state as state_mod
+
+    monkeypatch.setattr(playback, "clear_and_kill", lambda sid: None)
+
+    # Pre-condition: session not interactive.
+    s = state_mod.load("S")
+    assert s.interactive is False
+
+    speak.run(json.dumps({"session_id": "S", "hook_event_name": "UserPromptSubmit"}))
+
+    s2 = state_mod.load("S")
+    assert s2.interactive is True
+
+
+def test_notification_skipped_for_non_interactive_session(voice_home, plugin_root,
+                                                            write_config, monkeypatch):
+    """Notification (mode C) must also gate on interactive. A subagent emitting
+    a Notification shouldn't speak."""
+    write_config({"enabled": True, "mode": "C"})
+    from scripts import speak, tts
+
+    monkeypatch.setattr(tts, "synthesize",
+                        lambda text: pytest.fail("non-interactive Notification should not synth"))
+    payload = {"session_id": "subagent", "hook_event_name": "Notification",
+               "message": "Heads up!"}
+    assert speak.run(json.dumps(payload)) == 0
+
+
 # --- SessionStart / SessionEnd ---
 
 def test_sessionstart_cleans_stale(voice_home, plugin_root, write_config, monkeypatch):
@@ -65,7 +99,11 @@ def test_sessionend_removes_state_and_tmp(voice_home, plugin_root, write_config)
 def test_notification_speaks_message_in_mode_C(voice_home, plugin_root,
                                                  write_config, monkeypatch):
     write_config({"enabled": True, "mode": "C"})
-    from scripts import speak, extract, tts, playback
+    from scripts import speak, extract, tts, playback, state as state_mod
+
+    s = state_mod.load("S")
+    s.interactive = True
+    state_mod.save(s)
 
     monkeypatch.setattr(extract, "_voicify_async",
                         lambda text, model: _async_return("Heads up!"))

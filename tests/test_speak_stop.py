@@ -23,7 +23,12 @@ def test_stop_pipeline_strip_voicify_synth_enqueue(voice_home, plugin_root,
          ]}},
     ])
 
-    from scripts import speak, extract, tts, playback
+    from scripts import speak, extract, tts, playback, state as state_mod
+
+    # Mark session interactive (UserPromptSubmit would have done this).
+    s = state_mod.load("abc")
+    s.interactive = True
+    state_mod.save(s)
 
     # Mock the rewrite step so we don't hit the SDK.
     monkeypatch.setattr(extract, "_voicify_async",
@@ -40,6 +45,30 @@ def test_stop_pipeline_strip_voicify_synth_enqueue(voice_home, plugin_root,
     rc = speak.run(json.dumps(payload))
     assert rc == 0
     assert enqueued == [("abc", fake_audio)]
+
+
+def test_stop_skipped_when_session_not_interactive(voice_home, plugin_root,
+                                                     write_config, monkeypatch, tmp_path):
+    """Subagent and other non-human sessions never get UserPromptSubmit, so
+    Stop must skip them — otherwise every parallel agent on the box speaks."""
+    write_config({"enabled": True, "mode": "A"})
+    transcript = tmp_path / "session.jsonl"
+    _write_jsonl(transcript, [
+        {"type": "assistant",
+         "message": {"id": "m1", "content": [
+             {"type": "text", "text": "I'm ready when you are! What would you like to work on?"}
+         ]}},
+    ])
+    from scripts import speak, tts, playback
+
+    monkeypatch.setattr(tts, "synthesize",
+                        lambda text: pytest.fail("non-interactive Stop should not synth"))
+    monkeypatch.setattr(playback, "enqueue",
+                        lambda *a, **kw: pytest.fail("non-interactive Stop should not enqueue"))
+
+    payload = {"session_id": "subagent-xyz", "transcript_path": str(transcript),
+               "hook_event_name": "Stop"}
+    assert speak.run(json.dumps(payload)) == 0
 
 
 def test_stop_with_disabled_config_is_noop(voice_home, plugin_root, write_config, monkeypatch):
@@ -64,7 +93,11 @@ def test_stop_skips_when_strip_returns_empty(voice_home, plugin_root, write_conf
             {"type": "text", "text": "```python\nprint('x')\n```"}
         ]}},
     ])
-    from scripts import speak, extract, tts
+    from scripts import speak, extract, tts, state as state_mod
+
+    s = state_mod.load("x")
+    s.interactive = True
+    state_mod.save(s)
 
     monkeypatch.setattr(extract, "_voicify_async",
                         lambda text, model: pytest.fail("voicify should not be called"))
@@ -86,7 +119,11 @@ def test_stop_falls_back_to_stripped_when_voicify_returns_empty(
             {"type": "text", "text": "Here is some prose to speak about today."}
         ]}},
     ])
-    from scripts import speak, extract, tts, playback
+    from scripts import speak, extract, tts, playback, state as state_mod
+
+    s = state_mod.load("x")
+    s.interactive = True
+    state_mod.save(s)
 
     monkeypatch.setattr(extract, "_voicify_async", lambda text, model: _async_return(""))
     fake = voice_home / "tmp" / "fb.mp3"

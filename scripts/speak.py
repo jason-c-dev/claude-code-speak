@@ -41,6 +41,16 @@ def _handle_stop(payload: dict) -> None:
     transcript = Path(payload.get("transcript_path") or "")
     session_id = payload.get("session_id") or "default"
 
+    # Gate: only speak for sessions a human is actually driving. Subagents and
+    # other programmatic Claude Code instances never receive UserPromptSubmit,
+    # so without this check every parallel agent on the box would speak its
+    # final response.
+    s = state_mod.load(session_id)
+    if not s.interactive:
+        log.info("Stop: session %s is not interactive (no UserPromptSubmit seen); skipping",
+                 session_id)
+        return
+
     res = last_assistant_text(transcript)
     if res is None:
         log.info("Stop: no assistant message in transcript; nothing to speak")
@@ -75,6 +85,11 @@ def _handle_stop(payload: dict) -> None:
 def _handle_user_prompt_submit(payload: dict) -> None:
     session_id = payload.get("session_id") or "default"
     playback.clear_and_kill(session_id)
+    # Mark this session as human-interactive so Stop and Notification will
+    # speak for it. Subagents never reach this hook.
+    s = state_mod.load(session_id)
+    s.interactive = True
+    state_mod.save(s)
 
 
 def _handle_session_start(payload: dict) -> None:
@@ -98,6 +113,11 @@ def _handle_notification(payload: dict) -> None:
     cfg = load_config()
     if cfg.mode != "C":
         return
+    session_id = payload.get("session_id") or "default"
+    s = state_mod.load(session_id)
+    if not s.interactive:
+        get_logger().info("Notification: session %s not interactive; skipping", session_id)
+        return
     msg = payload.get("message") or ""
     if not msg.strip():
         return
@@ -112,7 +132,6 @@ def _handle_notification(payload: dict) -> None:
     audio = tts.synthesize(voiced)
     if audio is None:
         return
-    session_id = payload.get("session_id") or "default"
     playback.enqueue(session_id, audio)
 
 

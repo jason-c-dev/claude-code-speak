@@ -6,8 +6,16 @@ async def _async_return(value):
     return value
 
 
+def _mark_interactive(sid: str):
+    from scripts import state as state_mod
+    s = state_mod.load(sid)
+    s.interactive = True
+    state_mod.save(s)
+
+
 def test_cli_speaks_when_mode_b(voice_home, plugin_root, write_config, monkeypatch):
     write_config({"enabled": True, "mode": "B"})
+    _mark_interactive("S")
     from scripts import speak_cli, extract, tts, playback
 
     monkeypatch.setattr(extract, "_voicify_async",
@@ -29,8 +37,29 @@ def test_cli_speaks_when_mode_b(voice_home, plugin_root, write_config, monkeypat
     assert enqueued, "playback.enqueue should have been called"
 
 
+def test_cli_silent_when_no_interactive_session(voice_home, plugin_root,
+                                                  write_config, monkeypatch):
+    """Without any interactive session marker, the CLI must not enqueue audio.
+    This prevents subagents from playing audio that stacks with the user's
+    own session."""
+    write_config({"enabled": True, "mode": "B"})
+    from scripts import speak_cli, tts, playback
+
+    # Create state files but none flagged interactive — simulating subagent state.
+    (voice_home / "state" / "subagent-1.json").write_text(
+        '{"session_id": "subagent-1", "interactive": false, "queue": []}'
+    )
+
+    monkeypatch.setattr(tts, "synthesize", lambda text: voice_home / "tmp" / "x.mp3")
+    monkeypatch.setattr(playback, "enqueue",
+                        lambda *a, **kw: pytest.fail("must not enqueue without interactive session"))
+    rc = speak_cli.main(["speak_cli.py", "--inline", "Looking that up"])
+    assert rc == 0
+
+
 def test_cli_silent_in_mode_a(voice_home, plugin_root, write_config, monkeypatch):
     write_config({"enabled": True, "mode": "A"})
+    _mark_interactive("S")
     from scripts import speak_cli, tts
 
     monkeypatch.setattr(tts, "synthesize",
@@ -41,6 +70,7 @@ def test_cli_silent_in_mode_a(voice_home, plugin_root, write_config, monkeypatch
 
 def test_cli_silent_when_disabled(voice_home, plugin_root, write_config, monkeypatch):
     write_config({"enabled": False, "mode": "B"})
+    _mark_interactive("S")
     from scripts import speak_cli, tts
 
     monkeypatch.setattr(tts, "synthesize",
@@ -51,6 +81,7 @@ def test_cli_silent_when_disabled(voice_home, plugin_root, write_config, monkeyp
 
 def test_cli_silent_with_empty_text(voice_home, plugin_root, write_config, monkeypatch):
     write_config({"enabled": True, "mode": "B"})
+    _mark_interactive("S")
     from scripts import speak_cli, tts
 
     monkeypatch.setattr(tts, "synthesize",
@@ -63,6 +94,7 @@ def test_cli_joins_multiple_args_into_one_phrase(voice_home, plugin_root,
                                                    write_config, monkeypatch):
     """If invoked without quotes, argv comes in as multiple words; join them."""
     write_config({"enabled": True, "mode": "B"})
+    _mark_interactive("S")
     from scripts import speak_cli, tts, playback
 
     fake = voice_home / "tmp" / "j.mp3"
@@ -79,22 +111,26 @@ def test_cli_joins_multiple_args_into_one_phrase(voice_home, plugin_root,
     assert any("Looking that up" in t for t in synth_calls)
 
 
-def test_cli_uses_latest_session_id(voice_home, plugin_root, write_config, monkeypatch):
-    """The CLI looks up which session to enqueue into via the most-recent state file."""
-    import time
+def test_cli_picks_latest_interactive_session(voice_home, plugin_root,
+                                                write_config, monkeypatch):
+    """The CLI picks the most-recently-modified interactive session, skipping
+    non-interactive ones (subagents) even if they're newer."""
+    import time, os, json as _json
     write_config({"enabled": True, "mode": "B"})
     from scripts import speak_cli, extract, tts, playback
 
     state_dir = voice_home / "state"
-    older = state_dir / "older-session.json"
-    newer = state_dir / "newer-session.json"
-    older.write_text("{}")
-    newer.write_text("{}")
-    # Make newer's mtime later than older's.
+    older_interactive = state_dir / "older-interactive.json"
+    newer_subagent = state_dir / "newer-subagent.json"
+    older_interactive.write_text(_json.dumps(
+        {"session_id": "older-interactive", "interactive": True, "queue": []}
+    ))
+    newer_subagent.write_text(_json.dumps(
+        {"session_id": "newer-subagent", "interactive": False, "queue": []}
+    ))
     now = time.time()
-    import os
-    os.utime(older, (now - 100, now - 100))
-    os.utime(newer, (now, now))
+    os.utime(older_interactive, (now - 100, now - 100))
+    os.utime(newer_subagent, (now, now))
 
     monkeypatch.setattr(extract, "_voicify_async",
                         lambda text, model: _async_return("voiced"))
@@ -107,7 +143,8 @@ def test_cli_uses_latest_session_id(voice_home, plugin_root, write_config, monke
 
     speak_cli.main(["speak_cli.py", "--inline", "On it now"])
     assert enqueued, "should have enqueued"
-    assert enqueued[0][0] == "newer-session"
+    assert enqueued[0][0] == "older-interactive", \
+        "should skip newer-but-non-interactive session"
 
 
 def test_cli_bypasses_haiku_even_when_config_rewrite_is_true(
@@ -116,6 +153,7 @@ def test_cli_bypasses_haiku_even_when_config_rewrite_is_true(
     """The CLI is for short, intentional cues. cfg.rewrite=True controls the Stop
     hook's final-response polish but must NOT pull Haiku into pre-tool narration."""
     write_config({"enabled": True, "mode": "B", "rewrite": True})
+    _mark_interactive("S")
     from scripts import speak_cli, extract, tts, playback
 
     captured = {}
@@ -135,6 +173,7 @@ def test_cli_bypasses_haiku_even_when_config_rewrite_is_true(
 
 def test_cli_skips_when_synthesis_fails(voice_home, plugin_root, write_config, monkeypatch):
     write_config({"enabled": True, "mode": "B"})
+    _mark_interactive("S")
     from scripts import speak_cli, extract, tts, playback
 
     monkeypatch.setattr(extract, "_voicify_async",

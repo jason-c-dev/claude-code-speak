@@ -21,6 +21,11 @@ class SessionState:
     session_id: str
     current_pid: int | None = None
     queue: list[str] = field(default_factory=list)  # paths of pending audio files
+    # True only after UserPromptSubmit fired for this session — the signal that
+    # a real human is driving this session interactively. Subagents and other
+    # programmatic Claude Code instances never get UserPromptSubmit, so this
+    # gate prevents speech from leaking out of every parallel agent on the box.
+    interactive: bool = False
 
 
 def _path(session_id: str) -> Path:
@@ -56,6 +61,7 @@ def load(session_id: str) -> SessionState:
         session_id=raw.get("session_id", session_id),
         current_pid=raw.get("current_pid"),
         queue=raw.get("queue") or [],
+        interactive=bool(raw.get("interactive", False)),
     )
 
 

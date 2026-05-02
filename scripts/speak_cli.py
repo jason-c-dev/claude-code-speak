@@ -21,13 +21,18 @@ _PLUGIN_ROOT = str(Path(__file__).resolve().parent.parent)
 if _PLUGIN_ROOT not in sys.path:
     sys.path.insert(0, _PLUGIN_ROOT)
 
-from scripts import extract, playback, tts
+from scripts import extract, playback, state as state_mod, tts
 from scripts.config import load as load_config
 from scripts.log import get_logger, voice_home
 
 
-def _latest_session_id() -> str:
-    """Most-recently-modified state file's session_id, or 'default'."""
+def _latest_interactive_session_id() -> str | None:
+    """Session id of the most-recently-modified state file whose `interactive`
+    flag is True. Returns None if no interactive session exists.
+
+    Limiting to interactive sessions prevents CLI invocations made by
+    subagents or other programmatic Claude Code instances from playing
+    audio (which would stack with the user's own session)."""
     state_dir = voice_home() / "state"
     try:
         files = sorted(
@@ -36,8 +41,12 @@ def _latest_session_id() -> str:
             reverse=True,
         )
     except OSError:
-        return "default"
-    return files[0].stem if files else "default"
+        return None
+    for f in files:
+        s = state_mod.load(f.stem)
+        if s.interactive:
+            return f.stem
+    return None
 
 
 def _run(text: str) -> int:
@@ -81,7 +90,11 @@ def _run(text: str) -> int:
         log.warning("speak_cli: TTS produced no audio; skipping")
         return 0
 
-    playback.enqueue(_latest_session_id(), audio)
+    sid = _latest_interactive_session_id()
+    if sid is None:
+        log.info("speak_cli: no interactive session found; skipping playback")
+        return 0
+    playback.enqueue(sid, audio)
     return 0
 
 
