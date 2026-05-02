@@ -156,7 +156,7 @@ def test_sessionend_removes_state_and_tmp(voice_home, plugin_root, write_config)
 def test_notification_speaks_message_in_mode_C(voice_home, plugin_root,
                                                  write_config, monkeypatch):
     write_config({"enabled": True, "mode": "C"})
-    from scripts import speak, extract, tts, playback, state as state_mod
+    from scripts import speak, extract, playback, state as state_mod
 
     s = state_mod.load("S")
     s.interactive = True
@@ -165,17 +165,13 @@ def test_notification_speaks_message_in_mode_C(voice_home, plugin_root,
 
     monkeypatch.setattr(extract, "_voicify_async",
                         lambda text, model: _async_return("Heads up!"))
-    fake = voice_home / "tmp" / "n.mp3"
-    fake.parent.mkdir(parents=True, exist_ok=True)
-    fake.write_bytes(b"x")
-    monkeypatch.setattr(tts, "synthesize", lambda text: fake)
     enqueued = []
-    monkeypatch.setattr(playback, "enqueue", lambda s, p: enqueued.append((s, p)))
+    monkeypatch.setattr(playback, "enqueue", lambda s, t: enqueued.append((s, t)))
 
     payload = {"session_id": "S", "hook_event_name": "Notification",
                "message": "Claude needs your attention to continue."}
     speak.run(json.dumps(payload))
-    assert enqueued == [("S", fake)]
+    assert enqueued == [("S", "Heads up!")]
 
 
 def test_notification_skipped_in_mode_A(voice_home, plugin_root, write_config, monkeypatch):

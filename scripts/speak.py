@@ -13,7 +13,7 @@ import json
 from scripts import extract, playback, state as state_mod
 from scripts.config import load as load_config, plugin_root
 from scripts.log import get_logger
-from scripts.transcript import last_assistant_text
+from scripts.transcript import last_assistant_text, wait_for_settle
 
 
 def _mode_b_narration_instructions() -> str:
@@ -54,6 +54,12 @@ def _handle_stop(payload: dict) -> None:
     if not state_mod.is_active_session(session_id):
         log.info("Stop: session %s is not the active session; skipping", session_id)
         return
+
+    # Stop sometimes fires before the model's final text block has flushed to
+    # the JSONL (notably after Skill tool calls). Wait briefly for the file
+    # size to settle so last_assistant_text returns the actual final text,
+    # not the previous message.
+    wait_for_settle(transcript)
 
     res = last_assistant_text(transcript)
     if res is None:
