@@ -1,6 +1,7 @@
 """Text-to-speech with Deepgram primary and macOS `say` fallback."""
 from __future__ import annotations
 import json
+import os
 import subprocess
 import urllib.error
 import urllib.parse
@@ -18,6 +19,30 @@ def _tmp_dir() -> Path:
     d = voice_home() / "tmp"
     d.mkdir(parents=True, exist_ok=True)
     return d
+
+
+def _load_env_file_into_os() -> None:
+    """If DEEPGRAM_API_KEY isn't already set, read it from ~/.claude/voice/.env."""
+    if os.environ.get("DEEPGRAM_API_KEY"):
+        return
+    env_path = voice_home() / ".env"
+    if not env_path.exists():
+        return
+    try:
+        text = env_path.read_text()
+    except OSError:
+        return
+    for raw in text.splitlines():
+        line = raw.strip()
+        if not line or line.startswith("#") or "=" not in line:
+            continue
+        k, _, v = line.partition("=")
+        v = v.strip().strip('"').strip("'")
+        # Only set if not already set; never overwrite real env.
+        os.environ.setdefault(k.strip(), v)
+
+
+_load_env_file_into_os()
 
 
 def _synthesize_deepgram(
@@ -75,3 +100,74 @@ def _synthesize_deepgram(
     except OSError as e:
         log.warning("deepgram could not write tmp file: %s", e)
         return None
+
+
+SAY_TIMEOUT_SECONDS = 15
+
+
+def _synthesize_say(*, text: str, voice_name: str) -> Path | None:
+    log = get_logger()
+    try:
+        out = _tmp_dir() / f"{uuid.uuid4().hex}.aiff"
+    except OSError as e:
+        log.warning("say could not create tmp dir: %s", e)
+        return None
+    try:
+        result = subprocess.run(
+            ["say", "-v", voice_name, "-o", str(out), text],
+            check=False,
+            capture_output=True,
+            timeout=SAY_TIMEOUT_SECONDS,
+        )
+        if result.returncode != 0:
+            log.warning("say failed: rc=%d stderr=%s", result.returncode, result.stderr[:200])
+            return None
+        if not out.exists():
+            log.warning("say returned 0 but produced no file at %s", out)
+            return None
+        return out
+    except FileNotFoundError:
+        log.warning("`say` binary not found on PATH")
+        return None
+    except subprocess.TimeoutExpired:
+        log.warning("say timed out")
+        return None
+    except Exception as e:
+        log.warning("say unexpected error: %s", e)
+        return None
+
+
+def synthesize(text: str) -> Path | None:
+    """Synthesize `text` to an audio file using the configured TTS chain.
+
+    Returns the path to a playable file (mp3 or aiff), or None if every
+    backend failed. Never raises.
+    """
+    log = get_logger()
+    # Lazy import to avoid circular concerns if config evolves.
+    from scripts.config import load as load_config
+    cfg = load_config()
+    api_key = os.environ.get("DEEPGRAM_API_KEY", "")
+
+    # Primary: Deepgram, only if configured *and* a key is present.
+    if cfg.primary_tts == "deepgram" and api_key:
+        path = _synthesize_deepgram(
+            text=text,
+            voice=cfg.voice,
+            api_key=api_key,
+            speech_rate=cfg.speech_rate,
+            max_chars=cfg.max_deepgram_chars,
+        )
+        if path is not None:
+            return path
+        log.info("deepgram failed; falling back to %s", cfg.fallback_tts)
+
+    # Fallback: macOS say.
+    if cfg.fallback_tts == "say" or cfg.primary_tts == "say":
+        say_voice = cfg.say_voice_map.get(cfg.voice, "Samantha")
+        path = _synthesize_say(text=text, voice_name=say_voice)
+        if path is not None:
+            return path
+        log.warning("say also failed; speech will be silent")
+
+    return None
