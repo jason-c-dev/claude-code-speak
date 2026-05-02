@@ -1,9 +1,11 @@
-"""FIFO audio queue per session.
+"""FIFO speech queue per session.
 
-`enqueue(session_id, path)` appends to the session's queue and (if no
-player is currently running) launches a small Python child that drains
-the queue by calling `afplay` for each file. The child's PID is recorded
-in the session state so `clear_and_kill` can interrupt it.
+`enqueue(session_id, text)` appends a text chunk to the session's queue and
+(if no player is currently running) launches a small Python child that drains
+the queue by calling `tts.synthesize_and_play` for each chunk. The child's
+PID is recorded in session state so `clear_and_kill` can interrupt it; because
+the child is started with `start_new_session=True`, SIGTERMing the process
+group also kills any ffplay/afplay it spawned.
 
 All public functions never raise — voice is a UX layer, never load-bearing.
 """
@@ -23,23 +25,21 @@ if _PLUGIN_ROOT not in sys.path:
 from scripts.log import get_logger
 from scripts import state as state_mod
 
-AFPLAY_TIMEOUT_SECONDS = 60
 
-
-def enqueue(session_id: str, audio_path: Path) -> None:
-    """Append audio_path to session's queue; spawn a player if none running."""
+def enqueue(session_id: str, text: str) -> None:
+    """Append a text chunk to the session's queue; spawn a player if none running."""
     log = get_logger()
     try:
         s = state_mod.load(session_id)
-        s.queue.append(str(audio_path))
+        s.queue.append(text)
         state_mod.save(s)
     except Exception as e:
         log.warning("playback.enqueue failed for %s: %s", session_id, e)
         return
 
     if s.current_pid is not None:
-        log.info("player already running for %s (pid=%d); queued %s",
-                 session_id, s.current_pid, audio_path.name)
+        log.info("player already running for %s (pid=%d); queued %d-char chunk",
+                 session_id, s.current_pid, len(text))
         return
 
     # Spawn a fresh player process pointed at this session.
@@ -102,16 +102,43 @@ def clear_and_kill(session_id: str) -> None:
 
 
 def player_loop(session_id: str) -> None:
-    """Drain the session queue. Runs in a child process. Never raises."""
+    """Drain the session queue through one streaming session for gapless audio.
+
+    Runs in a child process. Never raises. The streaming session pulls text
+    chunks via a callback, so any chunks that arrive *during* playback (a
+    rare race when enqueue runs concurrently with the loop) get picked up
+    automatically without restarting ffplay.
+    """
     log = get_logger()
+    from scripts import tts
+
+    def _on_player_pid(pid: int) -> None:
+        log.info("playback subprocess pid=%d for %s", pid, session_id)
+
+    def _get_next_text() -> "str | None":
+        try:
+            s = state_mod.load(session_id)
+        except Exception as e:
+            log.warning("player_loop load failed for %s: %s", session_id, e)
+            return None
+        if not s.queue:
+            return None
+        text = s.queue.pop(0)
+        try:
+            state_mod.save(s)
+        except Exception:
+            pass
+        return text
+
     try:
+        # Outer loop catches the rare case where new chunks arrive AFTER the
+        # streaming session decided the queue was empty and closed ffplay.
         while True:
             try:
                 s = state_mod.load(session_id)
             except Exception as e:
                 log.warning("player_loop load failed for %s: %s", session_id, e)
                 return
-
             if not s.queue:
                 s.current_pid = None
                 try:
@@ -120,32 +147,13 @@ def player_loop(session_id: str) -> None:
                     pass
                 return
 
-            next_path = s.queue.pop(0)
             try:
-                state_mod.save(s)
-            except Exception:
-                pass
-
-            try:
-                subprocess.run(
-                    ["afplay", next_path],
-                    check=False,
-                    capture_output=True,
-                    timeout=AFPLAY_TIMEOUT_SECONDS,
+                tts.synthesize_and_play_session(
+                    _get_next_text, on_player_pid=_on_player_pid,
                 )
-            except FileNotFoundError:
-                log.warning("afplay missing; aborting player_loop for %s", session_id)
-                _drain_state(session_id)
-                return
-            except subprocess.TimeoutExpired:
-                log.warning("afplay timed out on %s", next_path)
             except Exception as e:
-                log.warning("afplay error on %s: %s", next_path, e)
-            finally:
-                try:
-                    Path(next_path).unlink(missing_ok=True)
-                except Exception:
-                    pass
+                log.warning("synthesize_and_play_session raised for %s: %s",
+                            session_id, e)
     except Exception as e:
         log.warning("player_loop crashed for %s: %s", session_id, e)
 

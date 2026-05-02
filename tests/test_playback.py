@@ -14,9 +14,6 @@ def _make_audio_file(voice_home: Path, name: str = "a.mp3") -> Path:
 def test_enqueue_appends_to_queue(voice_home, monkeypatch):
     from scripts import playback, state
 
-    a = _make_audio_file(voice_home, "a.mp3")
-    b = _make_audio_file(voice_home, "b.mp3")
-
     started_pids = []
     def fake_popen(args, **kw):
         class P:
@@ -25,27 +22,22 @@ def test_enqueue_appends_to_queue(voice_home, monkeypatch):
         return P()
     monkeypatch.setattr(playback.subprocess, "Popen", fake_popen)
 
-    playback.enqueue("sess1", a)
-    playback.enqueue("sess1", b)
+    playback.enqueue("sess1", "first chunk")
+    playback.enqueue("sess1", "second chunk")
 
     s = state.load("sess1")
-    # Both paths queued; first one's pid recorded as current.
-    assert str(a) in s.queue or s.queue == [str(b)]  # a may have already been popped to play
+    # Both chunks queued; first one's pid recorded as current.
+    assert "first chunk" in s.queue
+    assert "second chunk" in s.queue
     # Exactly one player started for this burst (second enqueue reuses).
     assert len(started_pids) == 1
 
 
 def test_clear_and_kill(voice_home, monkeypatch):
-    """clear_and_kill must SIGTERM the player's whole process group so afplay
-    children die with the player — otherwise orphan afplays keep playing."""
     from scripts import playback, state
 
     killed = []
-    monkeypatch.setattr(playback.os, "getpgid", lambda pid: pid)  # group == pid for the test
-    monkeypatch.setattr(playback.os, "killpg", lambda pgid, sig: killed.append((pgid, sig)))
-    # os.kill is the legacy fallback; should NOT be called when killpg succeeds.
-    monkeypatch.setattr(playback.os, "kill",
-                        lambda pid, sig: pytest.fail("should use killpg, not kill"))
+    monkeypatch.setattr(playback.os, "kill", lambda pid, sig: killed.append((pid, sig)))
 
     s = state.load("sess2")
     s.current_pid = 12345

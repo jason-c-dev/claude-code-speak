@@ -10,7 +10,7 @@ if _PLUGIN_ROOT not in sys.path:
     sys.path.insert(0, _PLUGIN_ROOT)
 
 import json
-from scripts import extract, playback, state as state_mod, tts
+from scripts import extract, playback, state as state_mod
 from scripts.config import load as load_config, plugin_root
 from scripts.log import get_logger
 from scripts.transcript import last_assistant_text
@@ -78,18 +78,14 @@ def _handle_stop(payload: dict) -> None:
         log.info("Stop: voicify returned empty; skipping")
         return
 
-    # Chunk into sentence-sized pieces so the first audio starts playing
-    # while later chunks are still synthesizing. Net effect: time-to-first-
-    # audio drops from ~full-text-synth to ~first-sentence-synth.
+    # Chunk into sentence-sized pieces and queue them as text. The player
+    # subprocess streams each chunk through Deepgram → ffplay so the first
+    # audio bytes start playing within ~one Deepgram-TTFB rather than waiting
+    # for the full mp3 to be synthesized and written to disk.
     chunks = extract.split_into_chunks(voiced)
-    log.info("Stop: synthesizing %d chunk(s)", len(chunks))
-    for i, chunk in enumerate(chunks):
-        audio = tts.synthesize(chunk)
-        if audio is None:
-            log.warning("Stop: TTS produced no audio for chunk %d/%d; continuing",
-                        i + 1, len(chunks))
-            continue
-        playback.enqueue(session_id, audio)
+    log.info("Stop: queuing %d chunk(s) for streaming playback", len(chunks))
+    for chunk in chunks:
+        playback.enqueue(session_id, chunk)
 
 
 def _handle_user_prompt_submit(payload: dict) -> None:
@@ -165,10 +161,7 @@ def _handle_notification(payload: dict) -> None:
     )
     if not voiced:
         return
-    audio = tts.synthesize(voiced)
-    if audio is None:
-        return
-    playback.enqueue(session_id, audio)
+    playback.enqueue(session_id, voiced)
 
 
 _DISPATCH = {
