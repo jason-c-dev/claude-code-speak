@@ -110,6 +110,7 @@ VOICIFY_SYSTEM_PROMPT = (
 
 async def _voicify_async(text: str, model: str) -> str:
     # Imported lazily so unit tests can run without the SDK installed.
+    import os
     from claude_agent_sdk import ClaudeSDKClient, ClaudeAgentOptions  # type: ignore
 
     options = ClaudeAgentOptions(
@@ -118,13 +119,25 @@ async def _voicify_async(text: str, model: str) -> str:
         allowed_tools=[],
     )
     parts: list[str] = []
-    async with ClaudeSDKClient(options=options) as client:
-        await client.query(text)
-        async for msg in client.receive_response():
-            for block in getattr(msg, "content", []) or []:
-                t = getattr(block, "text", None)
-                if t:
-                    parts.append(t)
+    # Mark this SDK invocation as internal so the child claude process's
+    # hooks short-circuit. Without this, the rewrite subagent fires its
+    # own UserPromptSubmit/Stop hooks and we end up speaking the rewrite
+    # subagent's own intro lines via every parallel voicify call.
+    prev = os.environ.get("CLAUDE_VOICE_INTERNAL")
+    os.environ["CLAUDE_VOICE_INTERNAL"] = "1"
+    try:
+        async with ClaudeSDKClient(options=options) as client:
+            await client.query(text)
+            async for msg in client.receive_response():
+                for block in getattr(msg, "content", []) or []:
+                    t = getattr(block, "text", None)
+                    if t:
+                        parts.append(t)
+    finally:
+        if prev is None:
+            os.environ.pop("CLAUDE_VOICE_INTERNAL", None)
+        else:
+            os.environ["CLAUDE_VOICE_INTERNAL"] = prev
     return "".join(parts).strip()
 
 

@@ -14,6 +14,36 @@ async def _async_return(v):
 
 # --- UserPromptSubmit ---
 
+def test_all_hooks_short_circuit_when_internal_env_set(voice_home, plugin_root,
+                                                         write_config, monkeypatch):
+    """When CLAUDE_VOICE_INTERNAL=1 (set by extract._voicify_async around the
+    Haiku SDK call), every hook handler must immediately return — otherwise
+    the rewrite subagent's own UserPromptSubmit/Stop fire and produce echoing
+    speech."""
+    write_config({"enabled": True, "mode": "B"})
+    monkeypatch.setenv("CLAUDE_VOICE_INTERNAL", "1")
+    from scripts import speak, tts, playback, state as state_mod
+
+    # Even if pre-conditions for speech are met, internal invocation must
+    # short-circuit before any handler runs.
+    s = state_mod.load("S")
+    s.interactive = True
+    state_mod.save(s)
+    state_mod.set_active_session("S")
+
+    monkeypatch.setattr(tts, "synthesize",
+                        lambda text: pytest.fail("internal hook must not synth"))
+    monkeypatch.setattr(playback, "enqueue",
+                        lambda *a, **kw: pytest.fail("internal hook must not enqueue"))
+    monkeypatch.setattr(playback, "clear_and_kill",
+                        lambda sid: pytest.fail("internal hook must not even kill"))
+
+    for ev in ("Stop", "PreToolUse", "PostToolUse", "UserPromptSubmit",
+               "Notification", "SessionStart", "SessionEnd"):
+        speak.run(json.dumps({"session_id": "S", "hook_event_name": ev,
+                              "transcript_path": "/x", "message": "x"}))
+
+
 def test_userpromptsubmit_clears_queue_and_kills_pid(voice_home, plugin_root,
                                                      write_config, monkeypatch):
     write_config({"enabled": True, "mode": "A"})

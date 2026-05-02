@@ -64,6 +64,12 @@ def _run(text: str) -> int:
         log.info("speak_cli: disabled in config; skipping")
         return 0
 
+    # Hard short-circuit for SDK-internal invocations (see speak.py for context).
+    import os
+    if os.environ.get("CLAUDE_VOICE_INTERNAL") == "1":
+        log.info("speak_cli: CLAUDE_VOICE_INTERNAL set; skipping")
+        return 0
+
     if cfg.mode != "B":
         log.info("speak_cli: mode is %s, skipping (only mode B narrates)", cfg.mode)
         return 0

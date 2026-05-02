@@ -180,6 +180,16 @@ def run(stdin_text: str) -> int:
     if not cfg.enabled:
         return 0
 
+    # Hard short-circuit for internal SDK invocations (e.g. voicify's Haiku
+    # rewrite subagent). The env var is set by extract._voicify_async so the
+    # child claude subprocess inherits it. Without this, every Haiku rewrite
+    # spawns a sub-Claude session that fires its own UserPromptSubmit + Stop
+    # hooks and speaks its own response in parallel.
+    import os
+    if os.environ.get("CLAUDE_VOICE_INTERNAL") == "1":
+        log.info("speak: CLAUDE_VOICE_INTERNAL set; skipping (SDK-internal session)")
+        return 0
+
     try:
         payload = json.loads(stdin_text or "{}")
     except json.JSONDecodeError as e:

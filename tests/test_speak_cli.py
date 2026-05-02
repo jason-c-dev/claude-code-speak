@@ -37,6 +37,23 @@ def test_cli_speaks_when_mode_b(voice_home, plugin_root, write_config, monkeypat
     assert enqueued, "playback.enqueue should have been called"
 
 
+def test_cli_short_circuits_when_internal_env_set(voice_home, plugin_root,
+                                                    write_config, monkeypatch):
+    """The CLI must respect CLAUDE_VOICE_INTERNAL — otherwise a Haiku rewrite
+    subagent could call the CLI and double up on audio."""
+    write_config({"enabled": True, "mode": "B"})
+    _mark_interactive("S")
+    monkeypatch.setenv("CLAUDE_VOICE_INTERNAL", "1")
+    from scripts import speak_cli, tts, playback
+
+    monkeypatch.setattr(tts, "synthesize",
+                        lambda text: pytest.fail("must not synth when internal"))
+    monkeypatch.setattr(playback, "enqueue",
+                        lambda *a, **kw: pytest.fail("must not enqueue when internal"))
+    rc = speak_cli.main(["speak_cli.py", "--inline", "Looking that up"])
+    assert rc == 0
+
+
 def test_cli_silent_when_no_interactive_session(voice_home, plugin_root,
                                                   write_config, monkeypatch):
     """Without any interactive session marker, the CLI must not enqueue audio.
