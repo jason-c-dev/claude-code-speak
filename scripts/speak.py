@@ -197,7 +197,38 @@ def run(stdin_text: str) -> int:
 
 
 def main() -> int:
-    return run(sys.stdin.read())
+    """Hook entrypoint.
+
+    By default we hand the slow work (TTS, Haiku rewrite, audio enqueue) to a
+    detached background worker so the hook returns to Claude Code in <100ms
+    rather than blocking the session for several seconds. The worker is the
+    same script reinvoked with --worker; it reads the original payload on stdin.
+
+    A hook can opt out of detachment with --inline (used by tests).
+    """
+    payload_bytes = sys.stdin.buffer.read()
+
+    if "--worker" in sys.argv or "--inline" in sys.argv:
+        return run(payload_bytes.decode("utf-8", errors="replace"))
+
+    # Detach to a background worker so the hook returns fast.
+    import subprocess
+    try:
+        proc = subprocess.Popen(
+            [sys.executable, str(Path(__file__).resolve()), "--worker"],
+            stdin=subprocess.PIPE,
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
+            start_new_session=True,
+        )
+        if proc.stdin is not None:
+            proc.stdin.write(payload_bytes)
+            proc.stdin.close()
+        return 0
+    except Exception as e:
+        # If we can't spawn a worker, fall back to inline processing.
+        get_logger().warning("speak: worker spawn failed (%s); processing inline", e)
+        return run(payload_bytes.decode("utf-8", errors="replace"))
 
 
 if __name__ == "__main__":
