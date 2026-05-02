@@ -38,19 +38,30 @@ def _assistant_text_blocks(entry: dict) -> list[str]:
 
 def last_assistant_text(transcript_path: Path) -> tuple[str, str] | None:
     """Return (message_id, concatenated_text) for the last assistant message,
-    or None if no assistant message exists."""
-    last = None
+    or None if no assistant message exists.
+
+    Claude Code writes a single assistant message as multiple JSONL entries —
+    one per content block (text, thinking, tool_use). Entries that share a
+    message id are the same logical message, so we aggregate text blocks
+    across ALL entries with the most-recent message id."""
+    last_id: str | None = None
+    parts_by_id: dict[str, list[str]] = {}
     for entry in _iter_entries(transcript_path):
-        if entry.get("type") == "assistant":
-            last = entry
-    if last is None:
+        if entry.get("type") != "assistant":
+            continue
+        msg = entry.get("message") or {}
+        mid = msg.get("id") or ""
+        if not mid:
+            # Fallback for entries missing an id: keep them in a sentinel bucket.
+            mid = "__no_id__"
+        last_id = mid
+        parts_by_id.setdefault(mid, []).extend(_assistant_text_blocks(entry))
+    if last_id is None:
         return None
-    msg = last.get("message") or {}
-    msg_id = msg.get("id") or ""
-    parts = _assistant_text_blocks(last)
+    parts = parts_by_id.get(last_id, [])
     if not parts:
-        return (msg_id, "")
-    return (msg_id, " ".join(parts))
+        return (last_id, "")
+    return (last_id, " ".join(parts))
 
 
 def current_assistant_text_after(
