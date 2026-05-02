@@ -62,7 +62,7 @@ def _coerce_bool(value, default: bool, key: str, log) -> bool:
 def _coerce_int(value, default: int, key: str, log, *, minimum: int | None = None) -> int:
     try:
         n = int(value)
-    except (TypeError, ValueError):
+    except (TypeError, ValueError, OverflowError):
         log.warning("config.%s: not a valid int %r; using default %r", key, value, default)
         return default
     if minimum is not None and n < minimum:
@@ -76,7 +76,7 @@ def _coerce_float(value, default: float, key: str, log,
                   maximum: float | None = None) -> float:
     try:
         n = float(value)
-    except (TypeError, ValueError):
+    except (TypeError, ValueError, OverflowError):
         log.warning("config.%s: not a valid float %r; using default %r", key, value, default)
         return default
     if minimum is not None and n < minimum:
