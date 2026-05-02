@@ -73,11 +73,13 @@ import asyncio
 from scripts.log import get_logger
 
 VOICIFY_SYSTEM_PROMPT = (
-    "You are rewriting text so it sounds natural when spoken aloud. "
-    "Take the input and return one or two natural spoken sentences, in the "
-    "same first-person voice as the original. Skip technical references, "
-    "code-like fragments, or anything that doesn't sound natural aloud. "
-    "If the input has nothing worth saying aloud, return the empty string. "
+    "You are polishing text so it sounds natural when spoken aloud. "
+    "Return one or two natural spoken sentences in the same first-person "
+    "voice as the input. Lightly smooth phrasing, drop code-like fragments "
+    "and technical references, but ALWAYS return real speakable English — "
+    "even short greetings, acknowledgments, or single-sentence updates "
+    "should be returned (lightly polished). Do NOT return the empty string "
+    "unless the input is literally just punctuation or symbols. "
     "Return ONLY the rewritten text — no preface, no quotation marks, no commentary."
 )
 
@@ -121,7 +123,14 @@ def voicify(
     if len(text) > max_chars:
         text = text[-max_chars:]
     try:
-        return asyncio.run(_voicify_async(text, model))
+        rewritten = asyncio.run(_voicify_async(text, model))
     except Exception as e:  # SDK failure must never propagate
         get_logger().warning("voicify Haiku call failed: %s; using stripped text", e)
         return text
+    # Safety net: if Haiku returns empty for non-trivial input, fall back to
+    # the stripped text rather than silently losing speakable content. The
+    # heuristic strip already filtered tiny/empty inputs upstream.
+    if not rewritten and text.strip():
+        get_logger().info("voicify returned empty for non-trivial input; using stripped text")
+        return text
+    return rewritten
