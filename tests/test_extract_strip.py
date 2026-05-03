@@ -37,11 +37,18 @@ def test_drops_dunder_identifiers():
 
 def test_drops_sha_like_inline_code():
     """Git SHAs in backticks (e.g. 'commit `f43f52a`') sound terrible
-    spelled out letter-by-letter."""
+    spelled out letter-by-letter. Revision ranges like 'a..b' or 'a...b'
+    that show up in commit-pushed messages also count."""
     assert strip_for_voice("Pushed in commit `f43f52a` earlier today") \
         == "Pushed in commit earlier today"
     assert strip_for_voice("The `0d6b4ae` hash is the current head right now") \
         == "The hash is the current head right now"
+    # Two-dot range from `git push` output
+    assert strip_for_voice("Pushed `41d1d3c..8e3bf54` to origin main earlier") \
+        == "Pushed to origin main earlier"
+    # Three-dot range (symmetric difference)
+    assert strip_for_voice("Diff `abc1234...def5678` shows the change clearly") \
+        == "Diff shows the change clearly"
 
 
 def test_drops_function_call_inline_code():

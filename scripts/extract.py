@@ -7,8 +7,9 @@ import unicodedata
 # Chars that mark `inline` content as code rather than English.
 # Any of these → drop the span; otherwise unwrap and speak it.
 _CODELIKE_CHARS = set("/\\(){}[]=;|&")
-# Git-SHA-like: 7+ hex chars, all lowercase.
-_SHA_LIKE = re.compile(r"^[0-9a-f]{7,40}$")
+# Git-SHA-like: 7+ hex chars, optionally followed by `..` or `...` and another SHA
+# (revision ranges from `git log A..B` / `git diff A...B`).
+_SHA_LIKE = re.compile(r"^[0-9a-f]{7,40}(?:\.{2,3}[0-9a-f]{7,40})?$")
 
 
 def _is_speakable_inline(content: str) -> bool:
