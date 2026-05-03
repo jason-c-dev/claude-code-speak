@@ -632,7 +632,7 @@ Expected: All PASS.
 The user's `config.json` is mode B; regenerate `hooks/hooks.json` so the new event is registered for runtime use:
 
 ```bash
-cd /Users/jason/dev/claude-chat
+cd ${CLAUDE_PLUGIN_ROOT}
 python3 -c "
 from scripts.hooks_gen import write
 from pathlib import Path
@@ -753,7 +753,7 @@ The user is running Claude Code with `claude --plugin-dir ~/dev/claude-chat`. Co
 tail -3 ~/.claude/voice/voice.log
 ```
 
-Look for log lines pointing to `/Users/jason/dev/claude-chat/...` rather than the cache path. If still pointing at cache, ask the user to restart with `--plugin-dir`.
+Look for log lines pointing to `${CLAUDE_PLUGIN_ROOT}/...` rather than the cache path. If still pointing at cache, ask the user to restart with `--plugin-dir`.
 
 - [ ] **Step 2: Run /reload-plugins so the new hooks.json takes effect**
 

@@ -247,7 +247,7 @@ No CI integration tests against the live Deepgram or Anthropic APIs in v1. The s
 ## File layout
 
 ```
-/Users/jason/dev/claude-chat/
+${CLAUDE_PLUGIN_ROOT}/
 ├── .claude-plugin/
 │   └── plugin.json
 ├── hooks/

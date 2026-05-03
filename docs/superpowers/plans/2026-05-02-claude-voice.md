@@ -12,7 +12,7 @@
 
 ## Working assumptions
 
-- All work happens in `/Users/jason/dev/claude-chat` (the plugin repo, already `git init`ed with one commit).
+- All work happens in `${CLAUDE_PLUGIN_ROOT}` (the plugin repo, already `git init`ed with one commit).
 - macOS only for v1.
 - Engineer is comfortable with Python and pytest but new to Claude Code plugins, the Claude Agent SDK, and Deepgram.
 - Use `pip` and the system Python by default; `uv` is fine if available but not required.
@@ -30,7 +30,7 @@
 - [ ] **Step 1: Create directory structure**
 
 ```bash
-cd /Users/jason/dev/claude-chat
+cd ${CLAUDE_PLUGIN_ROOT}
 mkdir -p scripts tests skills/voice-setup hooks .claude-plugin
 touch scripts/__init__.py tests/__init__.py
 ```
@@ -111,7 +111,7 @@ def test_pytest_runs():
 - [ ] **Step 5: Install pytest and the SDK**
 
 ```bash
-cd /Users/jason/dev/claude-chat
+cd ${CLAUDE_PLUGIN_ROOT}
 python3 -m pip install -e '.[test]'
 ```
 
@@ -120,7 +120,7 @@ Expected: pip resolves and installs `pytest` and `claude-agent-sdk`.
 - [ ] **Step 6: Run the smoke test**
 
 ```bash
-cd /Users/jason/dev/claude-chat
+cd ${CLAUDE_PLUGIN_ROOT}
 python3 -m pytest tests/test_smoke.py -v
 ```
 
@@ -2718,7 +2718,7 @@ DEEPGRAM_API_KEY=your-deepgram-key-here
 - [ ] **Step 3: Generate an initial `hooks/hooks.json` for mode A**
 
 ```bash
-cd /Users/jason/dev/claude-chat
+cd ${CLAUDE_PLUGIN_ROOT}
 python3 -c "from scripts.hooks_gen import write; from pathlib import Path; write(mode='A', out_path=Path('hooks/hooks.json'))"
 cat hooks/hooks.json
 ```
@@ -2772,7 +2772,7 @@ Be concise. One short prompt at a time. Use the Bash tool for commands and the E
 tools for files. Do NOT speak to them via the plugin during setup — that's the smoke test
 at the end.
 
-The plugin lives at `${CLAUDE_PLUGIN_ROOT}` (in this case `/Users/jason/dev/claude-chat`).
+The plugin lives at `${CLAUDE_PLUGIN_ROOT}` (in this case `${CLAUDE_PLUGIN_ROOT}`).
 Per-user data and secrets live at `~/.claude/voice/`.
 
 ## Step 1 — Pre-flight
@@ -2837,7 +2837,7 @@ preview for each candidate by running:
 python3 -c "
 from scripts import tts
 import os
-os.environ.setdefault('CLAUDE_PLUGIN_ROOT', '/Users/jason/dev/claude-chat')
+os.environ.setdefault('CLAUDE_PLUGIN_ROOT', '${CLAUDE_PLUGIN_ROOT}')
 # Temporarily override config voice via env (requires test path)
 # Or — simpler — just call _synthesize_deepgram directly:
 from scripts.tts import _synthesize_deepgram
@@ -2882,7 +2882,7 @@ Build the config object based on the user's picks and write to `${CLAUDE_PLUGIN_
 Run:
 
 ```
-cd /Users/jason/dev/claude-chat
+cd ${CLAUDE_PLUGIN_ROOT}
 python3 -c "from scripts.hooks_gen import write; from pathlib import Path; \
 import json; cfg = json.load(open('config.json')); \
 write(mode=cfg['mode'], out_path=Path('hooks/hooks.json'))"
@@ -2899,8 +2899,8 @@ pipeline the hooks would use:
 ```
 python3 -c "
 import os, sys
-os.environ.setdefault('CLAUDE_PLUGIN_ROOT', '/Users/jason/dev/claude-chat')
-sys.path.insert(0, '/Users/jason/dev/claude-chat')
+os.environ.setdefault('CLAUDE_PLUGIN_ROOT', '${CLAUDE_PLUGIN_ROOT}')
+sys.path.insert(0, '${CLAUDE_PLUGIN_ROOT}')
 from scripts import tts
 p = tts.synthesize(\"Voice setup complete. I'm ready to talk.\")
 print('audio:', p)
@@ -2953,7 +2953,7 @@ EOF
 - [ ] **Step 1: Run the full test suite**
 
 ```bash
-cd /Users/jason/dev/claude-chat
+cd ${CLAUDE_PLUGIN_ROOT}
 python3 -m pytest tests/ -v
 ```
 
@@ -2964,7 +2964,7 @@ Expected: all tests pass.
 In a Claude Code session in this directory:
 
 ```
-/plugin install /Users/jason/dev/claude-chat
+/plugin install ${CLAUDE_PLUGIN_ROOT}
 /reload-plugins
 ```
 
