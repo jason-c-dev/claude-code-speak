@@ -128,9 +128,11 @@ Any other Aura-2 model id (e.g. `aura-2-callista-en`) also works — see [Deepgr
 [Piper](https://github.com/rhasspy/piper) runs CPU-only with Apple-silicon-fast latency (~100ms). Quality is comparable to entry-tier Deepgram and fully local. To enable:
 
 ```bash
-brew install piper                        # or `pipx install piper-tts`
+# Install the Piper CLI. pipx is recommended; pip works too.
+pipx install piper-tts          # `brew install pipx` first if you don't have pipx
+
+# Download a voice. Pick any from https://huggingface.co/rhasspy/piper-voices
 mkdir -p ~/piper-voices && cd ~/piper-voices
-# Pick any voice from https://huggingface.co/rhasspy/piper-voices
 curl -LO https://huggingface.co/rhasspy/piper-voices/resolve/main/en/en_US/amy/medium/en_US-amy-medium.onnx
 curl -LO https://huggingface.co/rhasspy/piper-voices/resolve/main/en/en_US/amy/medium/en_US-amy-medium.onnx.json
 ```
