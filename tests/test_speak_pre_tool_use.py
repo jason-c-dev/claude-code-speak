@@ -75,11 +75,11 @@ def test_pre_tool_use_skipped_in_mode_a(
     from scripts import state as state_mod
     state_mod.set_active_session("S")
 
-    monkeypatch.setattr(playback, "enqueue",
-                        lambda *a, **kw: (_ for _ in ()).throw(
-                            AssertionError("must not enqueue in mode A")))
+    calls = []
+    monkeypatch.setattr(playback, "enqueue", lambda *a, **kw: calls.append((a, kw)))
     payload = {"hook_event_name": "PreToolUse", "session_id": "S", "tool_name": "Bash"}
     speak.run(json.dumps(payload))
+    assert calls == [], f"enqueue was called unexpectedly in mode A: {calls}"
 
 
 def test_pre_tool_use_skipped_when_session_not_interactive(
@@ -90,12 +90,12 @@ def test_pre_tool_use_skipped_when_session_not_interactive(
     write_config({"enabled": True, "mode": "B"})
     # Note: no _mark_interactive — subagent default state.
     from scripts import speak, playback
-    monkeypatch.setattr(playback, "enqueue",
-                        lambda *a, **kw: (_ for _ in ()).throw(
-                            AssertionError("must not enqueue for non-interactive")))
+    calls = []
+    monkeypatch.setattr(playback, "enqueue", lambda *a, **kw: calls.append((a, kw)))
     payload = {"hook_event_name": "PreToolUse",
                "session_id": "subagent-X", "tool_name": "Bash"}
     speak.run(json.dumps(payload))
+    assert calls == [], f"enqueue was called unexpectedly for non-interactive: {calls}"
 
 
 def test_pre_tool_use_skipped_when_session_not_active(
@@ -110,12 +110,12 @@ def test_pre_tool_use_skipped_when_session_not_active(
     from scripts import state as state_mod
     state_mod.set_active_session("ACTIVE")  # OTHER is not active
 
-    monkeypatch.setattr(playback, "enqueue",
-                        lambda *a, **kw: (_ for _ in ()).throw(
-                            AssertionError("must not enqueue for non-active")))
+    calls = []
+    monkeypatch.setattr(playback, "enqueue", lambda *a, **kw: calls.append((a, kw)))
     payload = {"hook_event_name": "PreToolUse",
                "session_id": "OTHER", "tool_name": "Bash"}
     speak.run(json.dumps(payload))
+    assert calls == [], f"enqueue was called unexpectedly for non-active: {calls}"
 
 
 def test_pre_tool_use_no_op_on_missing_tool_name(
@@ -127,11 +127,11 @@ def test_pre_tool_use_no_op_on_missing_tool_name(
     from scripts import state as state_mod
     state_mod.set_active_session("S")
 
-    monkeypatch.setattr(playback, "enqueue",
-                        lambda *a, **kw: (_ for _ in ()).throw(
-                            AssertionError("must not enqueue without tool_name")))
+    calls = []
+    monkeypatch.setattr(playback, "enqueue", lambda *a, **kw: calls.append((a, kw)))
     payload = {"hook_event_name": "PreToolUse", "session_id": "S"}
     speak.run(json.dumps(payload))
+    assert calls == [], f"enqueue was called unexpectedly without tool_name: {calls}"
 
 
 def test_pre_tool_use_speaks_in_mode_c(
