@@ -227,7 +227,9 @@ def _handle_pre_tool_use(payload: dict) -> None:
         log.info("PreToolUse: payload missing tool_name; skipping")
         return
 
-    phrase = tool_phrases.lookup(tool_name, cfg.tool_phrases)
+    tool_input = payload.get("tool_input") if isinstance(payload.get("tool_input"), dict) else None
+    phrase = tool_phrases.lookup(tool_name, tool_input=tool_input,
+                                 overrides=cfg.tool_phrases)
 
     # Dedup consecutive identical cues: three Edit calls in a row should
     # speak the cue once, not three times. We compare on the rendered phrase

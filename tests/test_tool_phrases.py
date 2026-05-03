@@ -61,3 +61,97 @@ def test_defaults_are_immutable():
     import pytest
     with pytest.raises(TypeError):
         DEFAULTS["Bash"] = "stomping"  # type: ignore[index]
+
+
+# --- Parameterized templates: substitute extracted target into the cue ---
+
+def test_lookup_inserts_basename_for_edit():
+    from scripts.tool_phrases import lookup
+    assert lookup("Edit", tool_input={"file_path": "/Users/jason/dev/claude-chat/scripts/speak.py"}) \
+        == "editing speak.py"
+
+
+def test_lookup_inserts_basename_for_read_and_write():
+    from scripts.tool_phrases import lookup
+    assert lookup("Read", tool_input={"file_path": "/tmp/foo.json"}) == "reading foo.json"
+    assert lookup("Write", tool_input={"file_path": "/x/y/z.md"}) == "writing z.md"
+
+
+def test_lookup_inserts_first_word_for_bash():
+    from scripts.tool_phrases import lookup
+    assert lookup("Bash", tool_input={"command": "git status --short"}) == "running git"
+    assert lookup("Bash", tool_input={"command": "python3 -m pytest -q"}) == "running python3"
+
+
+def test_lookup_inserts_hostname_for_webfetch():
+    from scripts.tool_phrases import lookup
+    assert lookup("WebFetch", tool_input={"url": "https://example.com/some/path?token=secret"}) \
+        == "fetching example.com"
+
+
+def test_lookup_inserts_truncated_query_for_websearch():
+    from scripts.tool_phrases import lookup
+    assert lookup("WebSearch", tool_input={"query": "current weather in San Jose California today"}) \
+        == "searching current weather in San Jose"
+
+
+def test_lookup_strips_skill_namespace():
+    from scripts.tool_phrases import lookup
+    assert lookup("Skill", tool_input={"skill": "superpowers:brainstorming"}) \
+        == "loading skill brainstorming"
+
+
+def test_lookup_falls_back_to_static_when_extractor_returns_none():
+    """Empty/missing input should produce the static phrase, not 'editing '."""
+    from scripts.tool_phrases import lookup
+    assert lookup("Edit", tool_input={"file_path": ""}) == "making an edit"
+    assert lookup("Edit", tool_input={}) == "making an edit"
+    assert lookup("Bash", tool_input={"command": "   "}) == "running a command"
+
+
+def test_lookup_static_when_no_tool_input_provided():
+    """Calling lookup without tool_input still works — static phrase."""
+    from scripts.tool_phrases import lookup
+    assert lookup("Edit") == "making an edit"
+    assert lookup("Bash") == "running a command"
+
+
+def test_lookup_overrides_with_template_substitute_target():
+    """A user override containing {target} opts into the same substitution
+    flow, using the same per-tool extractor."""
+    from scripts.tool_phrases import lookup
+    out = lookup("Edit",
+                 tool_input={"file_path": "/x/notes.md"},
+                 overrides={"Edit": "tweaking {target}"})
+    assert out == "tweaking notes.md"
+
+
+def test_lookup_overrides_without_template_are_static():
+    """Plain-string user overrides don't depend on tool_input."""
+    from scripts.tool_phrases import lookup
+    out = lookup("Edit",
+                 tool_input={"file_path": "/x/notes.md"},
+                 overrides={"Edit": "modifying"})
+    assert out == "modifying"
+
+
+def test_lookup_override_with_template_falls_back_when_extraction_fails():
+    """A user override with {target} but no extractable input should fall
+    back to the static default, not produce a clipped sentence."""
+    from scripts.tool_phrases import lookup
+    out = lookup("Edit",
+                 tool_input={},
+                 overrides={"Edit": "tweaking {target}"})
+    assert out == "making an edit"
+
+
+def test_lookup_unknown_tool_with_input_still_uses_fallback():
+    from scripts.tool_phrases import lookup
+    assert lookup("Mystery", tool_input={"x": "y"}) == "calling Mystery"
+
+
+def test_lookup_handles_non_dict_tool_input_gracefully():
+    """Defensive: extractors only accept Mappings; pass through to static."""
+    from scripts.tool_phrases import lookup
+    # tool_input as a list (malformed payload) — should not crash
+    assert lookup("Edit", tool_input=None) == "making an edit"

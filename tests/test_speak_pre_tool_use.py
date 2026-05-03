@@ -202,6 +202,61 @@ def test_pre_tool_use_speaks_when_phrase_changes(
     ], f"got {enqueued}"
 
 
+def test_pre_tool_use_renders_basename_from_tool_input(
+    voice_home, plugin_root, write_config, monkeypatch
+):
+    """Edit cue should include the basename of the file being edited."""
+    write_config({"enabled": True, "mode": "B"})
+    _mark_interactive("S")
+    from scripts import speak, playback
+    from scripts import state as state_mod
+    state_mod.set_active_session("S")
+
+    enqueued = []
+    monkeypatch.setattr(playback, "enqueue", lambda s, t: enqueued.append((s, t)))
+
+    payload = {
+        "hook_event_name": "PreToolUse", "session_id": "S",
+        "tool_name": "Edit",
+        "tool_input": {"file_path": "/Users/jason/dev/claude-chat/scripts/speak.py"},
+    }
+    speak.run(json.dumps(payload))
+    assert enqueued == [("S", "editing speak.py")]
+
+
+def test_pre_tool_use_dedup_passes_for_different_files(
+    voice_home, plugin_root, write_config, monkeypatch
+):
+    """Two Edits to DIFFERENT files render different phrases, so both speak.
+    The dedup naturally adapts — it compares the rendered phrase, not the
+    tool name."""
+    write_config({"enabled": True, "mode": "B"})
+    _mark_interactive("S")
+    from scripts import speak, playback
+    from scripts import state as state_mod
+    state_mod.set_active_session("S")
+
+    enqueued = []
+    monkeypatch.setattr(playback, "enqueue", lambda s, t: enqueued.append((s, t)))
+
+    fire_edit = lambda path: speak.run(json.dumps({
+        "hook_event_name": "PreToolUse", "session_id": "S",
+        "tool_name": "Edit",
+        "tool_input": {"file_path": path},
+    }))
+
+    fire_edit("/x/foo.py")
+    fire_edit("/x/foo.py")  # same file → dedups
+    fire_edit("/x/bar.py")  # different file → speaks
+    fire_edit("/x/bar.py")  # same again → dedups
+    fire_edit("/x/foo.py")  # back to foo → speaks (last cue was bar)
+    assert enqueued == [
+        ("S", "editing foo.py"),
+        ("S", "editing bar.py"),
+        ("S", "editing foo.py"),
+    ], f"got {enqueued}"
+
+
 def test_pre_tool_use_dedup_resets_on_user_prompt_submit(
     voice_home, plugin_root, write_config, monkeypatch
 ):
