@@ -20,3 +20,6 @@ venv/
 
 # Local-only Claude state (in case anything stray gets dropped here)
 .claude/state/
+
+# User-specific plugin config (voice/mode/api preferences). Ship config.example.json instead.
+config.json
