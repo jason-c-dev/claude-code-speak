@@ -183,9 +183,8 @@ def test_notification_skipped_in_mode_A(voice_home, plugin_root, write_config, m
                           "message": "x"}))
 
 
-# --- PreToolUse / PostToolUse: removed in favor of speak_cli (mode B narration is
-# Bash-driven by the assistant, not hook-scraped). The hooks no longer dispatch
-# either event. Tests for the speak CLI live in test_speak_cli.py.
+# --- PreToolUse: hook-driven tool cues (modes B/C). Tests live in
+# tests/test_speak_pre_tool_use.py.
 
 
 # --- SessionStart additionalContext (mode B narration instructions) ---
@@ -260,14 +259,32 @@ def test_sessionstart_emits_nothing_for_other_events(
 
 
 def test_mode_b_session_start_instruction_forbids_tool_narration():
-    """The hook handles tool cues now. The model must not double-narrate."""
+    """The hook handles tool cues now. The model must not double-narrate.
+
+    Strict assertions: a future rewrite that reintroduces 'narrate before
+    tool calls' would silently double-speak, so the test actively forbids
+    the old phrasing AND requires explicit negation language."""
     from scripts.speak import _mode_b_narration_instructions
     text = _mode_b_narration_instructions()
     text_lower = text.lower()
-    # Must explicitly tell the model NOT to narrate tool calls.
-    assert "tool" in text_lower
-    assert any(kw in text_lower for kw in ("not narrate", "don't narrate", "do not narrate",
-                                           "automatic", "handled automatically"))
-    # Must still mention interjections / non-tool moments as the speak_cli use case.
-    assert any(kw in text_lower for kw in ("interjection", "between tool", "non-tool",
-                                           "comment", "remark"))
+
+    # Must contain explicit negation about narrating tool calls.
+    assert any(kw in text_lower for kw in (
+        "do not narrate", "don't narrate", "must not narrate",
+    )), f"missing explicit negation; got: {text}"
+
+    # Must still describe speak_cli's legitimate use case (between-tool moments).
+    assert "between tool" in text_lower, \
+        f"missing 'between tool' interjection guidance; got: {text}"
+
+    # Must NOT contain the old "narrate before the tool call" instruction.
+    forbidden_phrases = [
+        "before the tool call",
+        "before any tool call",
+        "before issuing a tool call",
+        "before every tool call",
+        "narrate a short cue",  # signature phrase from the old instruction
+    ]
+    for phrase in forbidden_phrases:
+        assert phrase not in text_lower, \
+            f"old pre-tool narration instruction leaking through: {phrase!r}"
