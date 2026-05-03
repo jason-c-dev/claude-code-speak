@@ -1,5 +1,11 @@
 # Claude Voice
 
+[![License: MIT](https://img.shields.io/badge/license-MIT-yellow.svg)](LICENSE)
+[![Python 3.10+](https://img.shields.io/badge/python-3.10%2B-blue.svg)](https://www.python.org/downloads/)
+[![Platform: macOS](https://img.shields.io/badge/platform-macOS-lightgrey.svg)](#requirements)
+[![Claude Code](https://img.shields.io/badge/Claude%20Code-plugin-7c4dff.svg)](https://claude.com/claude-code)
+[![TTS](https://img.shields.io/badge/TTS-Deepgram%20%7C%20Piper%20%7C%20say-2ea44f.svg)](#voices)
+
 A Claude Code plugin that gives Claude a spoken voice. The natural-language parts of Claude's responses are spoken aloud through one of three TTS backends — Deepgram Aura-2 (cloud), Piper (local neural), or macOS `say` (local classic) — with automatic fallback if the primary fails. Code, tool calls, file paths, and other non-prose are filtered out.
 
 ## What it does
@@ -219,4 +225,4 @@ The plugin repo itself contains code, hooks, the setup skill, the spec, and exam
 
 ## License
 
-TBD — pre-release.
+MIT. See [LICENSE](LICENSE) for the full text.
