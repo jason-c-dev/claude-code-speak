@@ -3,8 +3,8 @@
 
 def test_lookup_returns_default_for_known_tool():
     from scripts.tool_phrases import lookup
-    assert lookup("Bash") == "running this"
-    assert lookup("Read") == "reading"
+    assert lookup("Bash") == "running a command"
+    assert lookup("Read") == "reading the file"
 
 
 def test_lookup_falls_back_to_calling_for_unknown_tool():
@@ -27,14 +27,14 @@ def test_lookup_ignores_non_string_override_entries():
     from scripts.tool_phrases import lookup
     bad = {"Bash": 123, "Read": None, "Write": "scribbling"}
     # Bash and Read overrides are dropped; defaults used. Write override applied.
-    assert lookup("Bash", overrides=bad) == "running this"
-    assert lookup("Read", overrides=bad) == "reading"
+    assert lookup("Bash", overrides=bad) == "running a command"
+    assert lookup("Read", overrides=bad) == "reading the file"
     assert lookup("Write", overrides=bad) == "scribbling"
 
 
 def test_lookup_handles_none_overrides():
     from scripts.tool_phrases import lookup
-    assert lookup("Bash", overrides=None) == "running this"
+    assert lookup("Bash", overrides=None) == "running a command"
 
 
 def test_clean_mcp_name_strips_prefix_and_separators():

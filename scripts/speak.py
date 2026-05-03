@@ -129,6 +129,10 @@ def _handle_user_prompt_submit(payload: dict) -> None:
     if res is not None:
         s.last_spoken_msg_id = res[0]
 
+    # Reset the PreToolUse dedup cache so the first cue of the new turn
+    # always plays, even if it matches the last cue of the previous turn.
+    s.last_pre_tool_phrase = None
+
     state_mod.save(s)
     # Take over as the active speaking session — any previously-active session
     # (e.g. a second Claude Code window) goes silent until the user prompts
@@ -224,8 +228,26 @@ def _handle_pre_tool_use(payload: dict) -> None:
         return
 
     phrase = tool_phrases.lookup(tool_name, cfg.tool_phrases)
+
+    # Dedup consecutive identical cues: three Edit calls in a row should
+    # speak the cue once, not three times. We compare on the rendered phrase
+    # (not the tool name) so user overrides that collapse multiple tools into
+    # one phrase also dedup. Reset happens at UserPromptSubmit, so each new
+    # turn always hears its first cue.
+    if phrase == s.last_pre_tool_phrase:
+        log.info("PreToolUse: tool=%s phrase=%r — duplicate of last; skipping",
+                 tool_name, phrase)
+        return
+
     log.info("PreToolUse: tool=%s phrase=%r", tool_name, phrase)
     playback.enqueue(session_id, phrase)
+    try:
+        s = state_mod.load(session_id)
+        s.last_pre_tool_phrase = phrase
+        state_mod.save(s)
+    except Exception as e:
+        log.warning("PreToolUse: failed to record last_pre_tool_phrase=%r: %s",
+                    phrase, e)
 
 
 _DISPATCH = {

@@ -60,6 +60,11 @@ class SessionState:
     # since the JSONL flush sometimes lags Stop hook fire by more than the
     # transcript settle window.
     last_spoken_msg_id: str | None = None
+    # Phrase enqueued for the most-recent PreToolUse cue in this turn. Used to
+    # dedup consecutive identical cues — three Edit calls in a row should
+    # speak "making an edit" once, not three times. Reset at UserPromptSubmit
+    # so each new turn always hears its first cue.
+    last_pre_tool_phrase: str | None = None
 
 
 def _path(session_id: str) -> Path:
@@ -97,6 +102,7 @@ def load(session_id: str) -> SessionState:
         queue=raw.get("queue") or [],
         interactive=bool(raw.get("interactive", False)),
         last_spoken_msg_id=raw.get("last_spoken_msg_id") or None,
+        last_pre_tool_phrase=raw.get("last_pre_tool_phrase") or None,
     )
 
 

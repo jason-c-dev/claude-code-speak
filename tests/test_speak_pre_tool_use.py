@@ -23,7 +23,7 @@ def test_pre_tool_use_speaks_known_tool_in_mode_b(
 
     payload = {"hook_event_name": "PreToolUse", "session_id": "S", "tool_name": "Bash"}
     speak.run(json.dumps(payload))
-    assert enqueued == [("S", "running this")]
+    assert enqueued == [("S", "running a command")]
 
 
 def test_pre_tool_use_uses_fallback_for_unknown_tool(
@@ -148,4 +148,93 @@ def test_pre_tool_use_speaks_in_mode_c(
 
     payload = {"hook_event_name": "PreToolUse", "session_id": "S", "tool_name": "Read"}
     speak.run(json.dumps(payload))
-    assert enqueued == [("S", "reading")]
+    assert enqueued == [("S", "reading the file")]
+
+
+def test_pre_tool_use_dedups_consecutive_identical_cues(
+    voice_home, plugin_root, write_config, monkeypatch
+):
+    """Three Edit calls in a row should speak the cue once, not three times."""
+    write_config({"enabled": True, "mode": "B"})
+    _mark_interactive("S")
+    from scripts import speak, playback
+    from scripts import state as state_mod
+    state_mod.set_active_session("S")
+
+    enqueued = []
+    monkeypatch.setattr(playback, "enqueue", lambda s, t: enqueued.append((s, t)))
+
+    payload = {"hook_event_name": "PreToolUse", "session_id": "S", "tool_name": "Edit"}
+    for _ in range(3):
+        speak.run(json.dumps(payload))
+    assert enqueued == [("S", "making an edit")], \
+        f"only the first Edit cue should speak; got {enqueued}"
+
+
+def test_pre_tool_use_speaks_when_phrase_changes(
+    voice_home, plugin_root, write_config, monkeypatch
+):
+    """Different tools (different phrases) must each speak. The dedup is
+    only against the last consecutive identical phrase, not 'have we ever
+    said this'."""
+    write_config({"enabled": True, "mode": "B"})
+    _mark_interactive("S")
+    from scripts import speak, playback
+    from scripts import state as state_mod
+    state_mod.set_active_session("S")
+
+    enqueued = []
+    monkeypatch.setattr(playback, "enqueue", lambda s, t: enqueued.append((s, t)))
+
+    fire = lambda tool: speak.run(json.dumps(
+        {"hook_event_name": "PreToolUse", "session_id": "S", "tool_name": tool}))
+
+    # Edit, Edit, Write, Edit — second Edit dedups, Write speaks, second Edit
+    # speaks again because the previous cue was Write, not Edit.
+    fire("Edit")
+    fire("Edit")
+    fire("Write")
+    fire("Edit")
+    assert enqueued == [
+        ("S", "making an edit"),
+        ("S", "writing a file"),
+        ("S", "making an edit"),
+    ], f"got {enqueued}"
+
+
+def test_pre_tool_use_dedup_resets_on_user_prompt_submit(
+    voice_home, plugin_root, write_config, monkeypatch
+):
+    """A new user prompt clears the dedup cache so the first cue of the new
+    turn plays even if it matches the last cue of the previous turn."""
+    write_config({"enabled": True, "mode": "B"})
+    _mark_interactive("S")
+    from scripts import speak, playback
+    from scripts import state as state_mod
+    state_mod.set_active_session("S")
+
+    enqueued = []
+    monkeypatch.setattr(playback, "enqueue", lambda s, t: enqueued.append((s, t)))
+    monkeypatch.setattr(playback, "clear_and_kill", lambda sid: None)
+
+    fire_tool = lambda tool: speak.run(json.dumps(
+        {"hook_event_name": "PreToolUse", "session_id": "S", "tool_name": tool}))
+
+    # Turn 1: two Edits — first speaks, second dedups.
+    fire_tool("Edit")
+    fire_tool("Edit")
+    assert enqueued == [("S", "making an edit")]
+
+    # User prompts again — UserPromptSubmit must reset the dedup cache.
+    speak.run(json.dumps({
+        "hook_event_name": "UserPromptSubmit",
+        "session_id": "S",
+        "transcript_path": "/nonexistent",
+    }))
+
+    # Turn 2: another Edit — should speak (dedup was reset).
+    fire_tool("Edit")
+    assert enqueued == [
+        ("S", "making an edit"),
+        ("S", "making an edit"),
+    ], f"second turn's first Edit should speak; got {enqueued}"
