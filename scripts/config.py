@@ -37,6 +37,9 @@ class Config:
     say_voice_map: Mapping[str, str] = field(
         default_factory=lambda: MappingProxyType(dict(DEFAULT_SAY_VOICE_MAP))
     )
+    tool_phrases: Mapping[str, str] = field(
+        default_factory=lambda: MappingProxyType({})
+    )
     rewrite: bool = True
     haiku_model: str = "claude-haiku-4-5-20251001"
     min_words: int = 3
@@ -104,6 +107,23 @@ def _coerce_voice_map(value, log) -> Mapping[str, str]:
     return MappingProxyType(merged)
 
 
+def _coerce_tool_phrases(value, log) -> Mapping[str, str]:
+    """Accept dict[str, str] only; ignore garbage. Empty mapping by default."""
+    if value is None:
+        return MappingProxyType({})
+    if not isinstance(value, dict):
+        log.warning("config.tool_phrases: expected object, got %r; ignoring",
+                    type(value).__name__)
+        return MappingProxyType({})
+    out: dict[str, str] = {}
+    for k, v in value.items():
+        if isinstance(k, str) and isinstance(v, str):
+            out[k] = v
+        else:
+            log.warning("config.tool_phrases: ignoring non-string entry %r=%r", k, v)
+    return MappingProxyType(out)
+
+
 def load() -> Config:
     """Load config.json; degrade silently to Config(enabled=False) on any error."""
     log = get_logger()
@@ -142,6 +162,7 @@ def load() -> Config:
             primary_tts=str(raw.get("primary_tts", defaults.primary_tts)),
             fallback_tts=str(raw.get("fallback_tts", defaults.fallback_tts)),
             say_voice_map=_coerce_voice_map(raw.get("say_voice_map"), log),
+            tool_phrases=_coerce_tool_phrases(raw.get("tool_phrases"), log),
             rewrite=_coerce_bool(raw.get("rewrite", defaults.rewrite), defaults.rewrite, "rewrite", log),
             haiku_model=str(raw.get("haiku_model", defaults.haiku_model)),
             min_words=_coerce_int(raw.get("min_words", defaults.min_words),

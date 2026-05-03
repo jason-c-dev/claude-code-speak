@@ -138,3 +138,42 @@ def test_garbage_in_voice_map_is_ignored(plugin_root: Path, write_config):
     cfg = config.load()
     assert cfg.say_voice_map["aura-2-thalia-en"] == "Bob"
     assert "bad" not in cfg.say_voice_map  # value not a string → rejected
+
+
+def test_tool_phrases_defaults_to_empty(plugin_root: Path, write_config):
+    """When config.json omits tool_phrases, cfg.tool_phrases is an empty mapping."""
+    from scripts import config
+
+    write_config({"enabled": True, "mode": "B"})
+    cfg = config.load()
+    assert dict(cfg.tool_phrases) == {}
+
+
+def test_tool_phrases_parses_valid_dict(plugin_root: Path, write_config):
+    from scripts import config
+
+    write_config({"enabled": True, "mode": "B", "tool_phrases": {"Bash": "executing"}})
+    cfg = config.load()
+    assert cfg.tool_phrases["Bash"] == "executing"
+
+
+def test_tool_phrases_ignores_non_dict(plugin_root: Path, write_config):
+    from scripts import config
+
+    write_config({"enabled": True, "mode": "B", "tool_phrases": "not a dict"})
+    cfg = config.load()
+    assert dict(cfg.tool_phrases) == {}
+
+
+def test_tool_phrases_drops_non_string_entries(plugin_root: Path, write_config):
+    from scripts import config
+
+    write_config({
+        "enabled": True,
+        "mode": "B",
+        "tool_phrases": {"Bash": "executing", "Read": 123, "Write": None}
+    })
+    cfg = config.load()
+    assert cfg.tool_phrases["Bash"] == "executing"
+    assert "Read" not in cfg.tool_phrases
+    assert "Write" not in cfg.tool_phrases
