@@ -3,6 +3,39 @@ from __future__ import annotations
 import re
 import unicodedata
 
+
+# Chars that mark `inline` content as code rather than English.
+# Any of these → drop the span; otherwise unwrap and speak it.
+_CODELIKE_CHARS = set("/\\(){}[]=;|&")
+# Git-SHA-like: 7+ hex chars, all lowercase.
+_SHA_LIKE = re.compile(r"^[0-9a-f]{7,40}$")
+
+
+def _is_speakable_inline(content: str) -> bool:
+    """Decide whether backtick content is short, English-ish, and worth
+    speaking — vs. code-like noise (paths, function calls, SHAs, dunders,
+    long identifiers).
+
+    Examples:
+        say → True             ~/foo/bar.txt → False
+        Edit → True            mcp__x__y → False (dunder)
+        config.json → True     a(b, c) → False (parens)
+        running this → True    f43f52a → False (hex SHA)
+        aura-2-thalia → True   verylongidentifierthatwouldsoundbad → False (>30 chars)
+    """
+    s = content.strip()
+    if not s or len(s) > 30:
+        return False
+    if "://" in s:
+        return False
+    if any(c in s for c in _CODELIKE_CHARS):
+        return False
+    if "_" in s:  # any underscore looks like an identifier (snake_case, dunders)
+        return False
+    if _SHA_LIKE.match(s):
+        return False
+    return True
+
 # 1. Fenced code blocks.
 _FENCED = re.compile(r"```.*?```", flags=re.DOTALL)
 # 2. Inline code.
@@ -116,11 +149,17 @@ def _is_emoji(ch: str) -> bool:
     return False
 
 
+def _unwrap_or_drop_inline(match: re.Match) -> str:
+    """Backtick content → spoken word if speakable, dropped otherwise."""
+    inner = match.group(0)[1:-1]  # strip the surrounding backticks
+    return inner if _is_speakable_inline(inner) else " "
+
+
 def strip_for_voice(text: str, min_words: int = MIN_WORDS_DEFAULT) -> str:
     """Extract speakable prose. Returns '' if nothing worth saying."""
     s = text
     s = _FENCED.sub(" ", s)
-    s = _INLINE.sub(" ", s)
+    s = _INLINE.sub(_unwrap_or_drop_inline, s)
     s = _FILE_LINE.sub(" ", s)
     s = _URL.sub(" ", s)
     s = _BOLD.sub(r"\1", s)

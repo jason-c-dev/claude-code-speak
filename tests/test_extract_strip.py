@@ -6,9 +6,56 @@ def test_drops_fenced_code_blocks():
     assert strip_for_voice(text) == "Here we go. Done."
 
 
-def test_drops_inline_code():
-    text = "Run `pytest -v` to verify."
-    assert strip_for_voice(text) == "Run to verify."
+def test_unwraps_speakable_inline_code():
+    """Single words and short phrases inside backticks are unwrapped and
+    spoken — they're often common English words ('say', 'Edit', 'Bash')
+    that would leave glaring gaps if dropped."""
+    assert strip_for_voice("Run `pytest -v` to verify the build works") \
+        == "Run pytest -v to verify the build works"
+    assert strip_for_voice("Either `say` or piper handles fallback locally") \
+        == "Either say or piper handles fallback locally"
+    assert strip_for_voice("The `Edit` tool is fired most often") \
+        == "The Edit tool is fired most often"
+
+
+def test_drops_path_like_inline_code():
+    """Paths inside backticks are noise — never speakable."""
+    assert strip_for_voice("See `~/piper-voices/en_US-amy-medium.onnx` for the model") \
+        == "See for the model"
+    assert strip_for_voice("The plugin lives at `${CLAUDE_PLUGIN_ROOT}` for now") \
+        == "The plugin lives at for now"
+
+
+def test_drops_dunder_identifiers():
+    """Dunder-style identifiers (Python __methods__, MCP tool names) sound
+    awful read aloud."""
+    assert strip_for_voice("Calling `mcp__claude_ai_Gmail__search_threads` for that") \
+        == "Calling for that"
+    assert strip_for_voice("The `_handle_pre_tool_use` function gates the cue properly") \
+        == "The function gates the cue properly"
+
+
+def test_drops_sha_like_inline_code():
+    """Git SHAs in backticks (e.g. 'commit `f43f52a`') sound terrible
+    spelled out letter-by-letter."""
+    assert strip_for_voice("Pushed in commit `f43f52a` earlier today") \
+        == "Pushed in commit earlier today"
+    assert strip_for_voice("The `0d6b4ae` hash is the current head right now") \
+        == "The hash is the current head right now"
+
+
+def test_drops_function_call_inline_code():
+    """Anything with parens / equals / semicolons reads as code."""
+    assert strip_for_voice("The `lookup(name)` returns a phrase from the map") \
+        == "The returns a phrase from the map"
+    assert strip_for_voice("Set `enabled = true` in your config to enable") \
+        == "Set in your config to enable"
+
+
+def test_drops_overly_long_inline_code():
+    """Very long backtick spans are almost certainly code, not speech."""
+    long = "x" * 35
+    assert "x" not in strip_for_voice(f"the value is `{long}` if you check it")
 
 
 def test_drops_file_line_refs():
