@@ -257,3 +257,17 @@ def test_sessionstart_emits_nothing_for_other_events(
     )
     assert wrote is False
     assert capsys.readouterr().out == ""
+
+
+def test_mode_b_session_start_instruction_forbids_tool_narration():
+    """The hook handles tool cues now. The model must not double-narrate."""
+    from scripts.speak import _mode_b_narration_instructions
+    text = _mode_b_narration_instructions()
+    text_lower = text.lower()
+    # Must explicitly tell the model NOT to narrate tool calls.
+    assert "tool" in text_lower
+    assert any(kw in text_lower for kw in ("not narrate", "don't narrate", "do not narrate",
+                                           "automatic", "handled automatically"))
+    # Must still mention interjections / non-tool moments as the speak_cli use case.
+    assert any(kw in text_lower for kw in ("interjection", "between tool", "non-tool",
+                                           "comment", "remark"))

@@ -17,21 +17,26 @@ from scripts.transcript import last_assistant_text, wait_for_new_message
 
 
 def _mode_b_narration_instructions() -> str:
-    """Instructions Claude needs to narrate via the speak CLI in mode B."""
+    """Instructions Claude needs for non-tool interjections in mode B.
+
+    Tool cues are handled automatically by the PreToolUse hook — the model
+    must NOT narrate tool calls itself, or the user hears double-speak (hook
+    says 'running this,' model says 'Looking that up'). speak_cli is reserved
+    for interjections between tool calls."""
     cli = plugin_root() / "scripts" / "speak_cli.py"
     return (
-        "Claude Voice mode B is active. Before issuing a tool call that may "
-        "take more than a moment (web fetches, searches, file reads on "
-        "unfamiliar code, MCP calls, etc.), narrate a short cue out loud by "
-        "running this Bash command IMMEDIATELY before the tool call:\n\n"
-        f"    python3 \"{cli}\" \"<short cue>\"\n\n"
-        "The cue should be 2-6 conversational words like \"Looking that up\", "
-        "\"Pulling it up\", \"Checking now\", \"On it\". Keep it varied and "
-        "natural. Only narrate when the wait would be noticeable; don't "
-        "narrate trivial reads or quick edits. The CLI returns immediately; "
-        "audio plays in the background and won't slow you down. Final-response "
-        "speech at end of turn is automatic — you don't need to call the CLI "
-        "for that."
+        "Claude Voice mode B is active. Tool cues are handled automatically "
+        "by a PreToolUse hook — DO NOT narrate before tool calls yourself. "
+        "Doing so causes the user to hear two phrases for one tool.\n\n"
+        "speak_cli is reserved for short interjections BETWEEN tool calls "
+        "(not before them) — moments like 'hmm, that's odd,' 'that didn't "
+        "work, let me try something else,' or 'interesting.' Invoke via Bash:\n\n"
+        f"    python3 \"{cli}\" \"<short remark>\"\n\n"
+        "Keep it varied (2-6 words) and use it sparingly — only when the "
+        "remark adds something the user wouldn't get from the audible tool "
+        "cue plus the visual transcript. The CLI returns immediately; audio "
+        "plays in the background. Final-response speech at end of turn is "
+        "automatic — don't call the CLI for that either."
     )
 
 
