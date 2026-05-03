@@ -1,4 +1,14 @@
-"""Text-to-speech with Deepgram primary and macOS `say` fallback."""
+"""Text-to-speech with three local/cloud backends:
+- Deepgram (cloud, neural Aura-2 voices, streaming-capable)
+- Piper (local, neural ONNX voices, file-based)
+- macOS `say` (local, classic system voices, file-based)
+
+The synthesize chain walks `[cfg.primary_tts, cfg.fallback_tts]` in order
+and returns the first backend that produces audio. Each backend
+short-circuits gracefully if its prerequisites are missing (no API key,
+binary not on PATH, model file missing, etc.) so callers can list any
+combination without worrying about install state.
+"""
 from __future__ import annotations
 import json
 import os
@@ -108,6 +118,82 @@ def _synthesize_deepgram(
         return None
 
 
+PIPER_TIMEOUT_SECONDS = 30
+
+
+def _synthesize_piper(
+    *, text: str, voice_path: str, speech_rate: float = 1.0,
+) -> Path | None:
+    """Synthesize `text` via the local Piper TTS binary.
+
+    Piper voice models are an `.onnx` file plus a sibling `.onnx.json`
+    config file. `voice_path` points to the `.onnx`. Tilde is expanded
+    so `~/piper-voices/...` works.
+
+    Returns a wav path on success. Returns None — and logs why — on:
+      - empty `voice_path` (Piper not configured)
+      - missing `piper` binary (not installed / not on PATH)
+      - missing model file
+      - non-zero exit / timeout / unexpected error
+
+    `speech_rate` maps to Piper's `--length-scale` inversely (rate=1.0 →
+    length-scale=1.0; rate=2.0 → length-scale=0.5; etc.). Clamped to a
+    sane range so a typo doesn't produce silence.
+    """
+    log = get_logger()
+    if not voice_path:
+        log.info("piper: piper_voice not configured; skipping")
+        return None
+
+    expanded = Path(voice_path).expanduser()
+    if not expanded.exists():
+        log.warning("piper: voice model not found at %s", expanded)
+        return None
+
+    if shutil.which("piper") is None:
+        log.warning("piper: `piper` binary not found on PATH")
+        return None
+
+    try:
+        out = _tmp_dir() / f"{uuid.uuid4().hex}.wav"
+    except OSError as e:
+        log.warning("piper: could not create tmp dir: %s", e)
+        return None
+
+    # Piper's --length-scale is the duration multiplier. To speed up speech
+    # we shrink durations, so length_scale = 1 / speech_rate.
+    safe_rate = max(0.5, min(speech_rate or 1.0, 2.0))
+    length_scale = 1.0 / safe_rate
+
+    try:
+        result = subprocess.run(
+            [
+                "piper",
+                "--model", str(expanded),
+                "--output_file", str(out),
+                "--length-scale", f"{length_scale:.4f}",
+            ],
+            input=text,
+            text=True,
+            check=False,
+            capture_output=True,
+            timeout=PIPER_TIMEOUT_SECONDS,
+        )
+        if result.returncode != 0:
+            log.warning("piper: rc=%d stderr=%s", result.returncode, result.stderr[:200])
+            return None
+        if not out.exists() or out.stat().st_size == 0:
+            log.warning("piper: returned 0 but produced no audio at %s", out)
+            return None
+        return out
+    except subprocess.TimeoutExpired:
+        log.warning("piper: timed out after %ds", PIPER_TIMEOUT_SECONDS)
+        return None
+    except Exception as e:
+        log.warning("piper: unexpected error: %s", e)
+        return None
+
+
 SAY_TIMEOUT_SECONDS = 15
 
 
@@ -143,39 +229,75 @@ def _synthesize_say(*, text: str, voice_name: str) -> Path | None:
         return None
 
 
-def synthesize(text: str) -> Path | None:
-    """Synthesize `text` to an audio file using the configured TTS chain.
+_VALID_BACKENDS = ("deepgram", "piper", "say")
 
-    Returns the path to a playable file (mp3 or aiff), or None if every
-    backend failed. Never raises.
-    """
+
+def _try_backend(backend: str, *, text: str, cfg, api_key: str) -> Path | None:
+    """Attempt one synthesis backend. Returns None on any failure (missing
+    prerequisites, network error, etc.) so the caller can move on to the
+    next backend in the chain."""
     log = get_logger()
-    # Lazy import to avoid circular concerns if config evolves.
-    from scripts.config import load as load_config
-    cfg = load_config()
-    api_key = os.environ.get("DEEPGRAM_API_KEY", "")
-
-    # Primary: Deepgram, only if configured *and* a key is present.
-    if cfg.primary_tts == "deepgram" and api_key:
-        path = _synthesize_deepgram(
+    if backend == "deepgram":
+        if not api_key:
+            log.info("deepgram: no DEEPGRAM_API_KEY set; skipping")
+            return None
+        return _synthesize_deepgram(
             text=text,
             voice=cfg.voice,
             api_key=api_key,
             speech_rate=cfg.speech_rate,
             max_chars=cfg.max_deepgram_chars,
         )
-        if path is not None:
-            return path
-        log.info("deepgram failed; falling back to %s", cfg.fallback_tts)
-
-    # Fallback: macOS say.
-    if cfg.fallback_tts == "say" or cfg.primary_tts == "say":
+    if backend == "piper":
+        return _synthesize_piper(
+            text=text,
+            voice_path=cfg.piper_voice,
+            speech_rate=cfg.speech_rate,
+        )
+    if backend == "say":
         say_voice = cfg.say_voice_map.get(cfg.voice, "Samantha")
-        path = _synthesize_say(text=text, voice_name=say_voice)
+        return _synthesize_say(text=text, voice_name=say_voice)
+    log.warning("unknown TTS backend %r; skipping", backend)
+    return None
+
+
+def _backend_chain(cfg) -> list[str]:
+    """Build the ordered list of backends to try: primary, then fallback if
+    distinct. Unknown backend names are logged and dropped."""
+    log = get_logger()
+    chain: list[str] = []
+    for slot, name in (("primary_tts", cfg.primary_tts),
+                        ("fallback_tts", cfg.fallback_tts)):
+        if not name:
+            continue
+        if name not in _VALID_BACKENDS:
+            log.warning("config.%s: %r is not a known backend %s; skipping",
+                        slot, name, _VALID_BACKENDS)
+            continue
+        if name not in chain:
+            chain.append(name)
+    return chain
+
+
+def synthesize(text: str) -> Path | None:
+    """Synthesize `text` to an audio file using the configured TTS chain.
+
+    Walks `[cfg.primary_tts, cfg.fallback_tts]` in order, returning the
+    first backend that produces a playable file. Returns None if every
+    backend failed. Never raises.
+    """
+    log = get_logger()
+    from scripts.config import load as load_config
+    cfg = load_config()
+    api_key = os.environ.get("DEEPGRAM_API_KEY", "")
+
+    for backend in _backend_chain(cfg):
+        path = _try_backend(backend, text=text, cfg=cfg, api_key=api_key)
         if path is not None:
             return path
-        log.warning("say also failed; speech will be silent")
+        log.info("%s synthesis failed; trying next backend", backend)
 
+    log.warning("all TTS backends failed; speech will be silent")
     return None
 
 
@@ -538,9 +660,10 @@ def synthesize_and_play(
     """Synthesize `text` and play it. Blocks until audio finishes.
 
     Tries (in order):
-      1. Deepgram → ffplay streaming (low time-to-first-audio).
-      2. Deepgram → temp mp3 → afplay.
-      3. macOS `say` → temp aiff → afplay.
+      1. Deepgram → ffplay streaming (low time-to-first-audio), only when
+         primary_tts is "deepgram" and a key is configured.
+      2. The file-based backend chain from `synthesize()` (deepgram, piper,
+         or say depending on primary/fallback config) → afplay.
 
     Returns True if anything actually played, False otherwise. Never raises.
     `on_player_pid(pid)` is called whenever a playback subprocess is spawned,
@@ -551,7 +674,7 @@ def synthesize_and_play(
     cfg = load_config()
     api_key = os.environ.get("DEEPGRAM_API_KEY", "")
 
-    # Path 1: streaming Deepgram → ffplay.
+    # Path 1: streaming Deepgram → ffplay (low TTFB).
     if cfg.primary_tts == "deepgram" and api_key:
         ok = _stream_deepgram_to_ffplay(
             text=text,
@@ -565,22 +688,9 @@ def synthesize_and_play(
             return True
         log.info("streaming TTS unavailable; falling back to file-based synth")
 
-    # Path 2 / 3: existing file-based chain (Deepgram-to-file, then say-to-file).
-    path: Path | None = None
-    if cfg.primary_tts == "deepgram" and api_key:
-        path = _synthesize_deepgram(
-            text=text,
-            voice=cfg.voice,
-            api_key=api_key,
-            speech_rate=cfg.speech_rate,
-            max_chars=cfg.max_deepgram_chars,
-        )
-    if path is None and (cfg.fallback_tts == "say" or cfg.primary_tts == "say"):
-        say_voice = cfg.say_voice_map.get(cfg.voice, "Samantha")
-        path = _synthesize_say(text=text, voice_name=say_voice)
-
+    # Path 2: file-based chain (deepgram → piper → say, per cfg).
+    path = synthesize(text)
     if path is None:
-        log.warning("all TTS backends failed; nothing to play")
         return False
 
     return _play_file_with_afplay(path, on_player_pid=on_player_pid)

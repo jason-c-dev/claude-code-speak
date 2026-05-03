@@ -1,6 +1,6 @@
 # Claude Voice
 
-A Claude Code plugin that gives Claude a spoken voice. The natural-language parts of Claude's responses are spoken aloud through Deepgram Aura-2 (with macOS `say` as a local fallback). Code, tool calls, file paths, and other non-prose are filtered out.
+A Claude Code plugin that gives Claude a spoken voice. The natural-language parts of Claude's responses are spoken aloud through one of three TTS backends — Deepgram Aura-2 (cloud), Piper (local neural), or macOS `say` (local classic) — with automatic fallback if the primary fails. Code, tool calls, file paths, and other non-prose are filtered out.
 
 ## What it does
 
@@ -29,6 +29,7 @@ Mode is set via `config.json`. The setup skill regenerates `hooks/hooks.json` so
 - [Claude Code](https://claude.com/claude-code) with a Max plan (only needed if you re-enable the Haiku rewrite step; off by default)
 - Optional but recommended: a [Deepgram](https://deepgram.com) API key (free tier works; Aura-2 voices are well above `say` quality)
 - Optional but recommended: `ffplay` from `ffmpeg` (`brew install ffmpeg`). With `ffplay`, audio streams directly from Deepgram for ~1s time-to-first-audio. Without it, the plugin falls back to writing temp mp3s and playing with `afplay`.
+- Optional: [Piper](https://github.com/rhasspy/piper) for local neural TTS that beats `say` quality without needing a network. See the [Voices](#voices) section below.
 
 ## Install
 
@@ -70,10 +71,14 @@ Plugin-level config lives in `config.json` at the repo root. The setup skill reg
   "voice": "aura-2-thalia-en",
   "primary_tts": "deepgram",
   "fallback_tts": "say",
+  "piper_voice": "",
+  "say_voice_map": {},
   "rewrite": true,
   "speech_rate": 1.0
 }
 ```
+
+`primary_tts` and `fallback_tts` each accept `"deepgram"`, `"piper"`, or `"say"`. The plugin tries primary first; if that backend's prerequisites are missing or it returns no audio, it falls through to fallback. See [Voices](#voices) for backend details.
 
 Your Deepgram key lives **outside the repo** at `~/.claude/voice/.env`:
 
@@ -92,6 +97,73 @@ echo '{"enabled": false}' | jq -s '.[0] * .[1]' config.json - > /tmp/c.json && m
 ```
 
 (Or simply uninstall the plugin via `/plugin uninstall`.)
+
+## Voices
+
+Three TTS backends are supported. Mix-and-match via `primary_tts` / `fallback_tts` in `config.json`.
+
+### Deepgram (cloud, default primary)
+
+Aura-2 neural voices. Pick one via `voice` in config; the setup skill knows the curated set:
+
+| Voice id | Description |
+|---|---|
+| `aura-2-thalia-en` (default) | Clear, confident, energetic American female |
+| `aura-2-orion-en` | Approachable American male |
+| `aura-2-luna-en` | Friendly young-adult American female |
+| `aura-2-asteria-en` | Knowledgeable, energetic American female |
+| `aura-2-zeus-en` | Deep, trustworthy American male |
+| `aura-2-pandora-en` | Smooth, calm British female |
+
+Any other Aura-2 model id (e.g. `aura-2-callista-en`) also works — see [Deepgram's docs](https://developers.deepgram.com/docs/tts-models) for the full list. Streaming via `ffplay` keeps time-to-first-audio around 1s.
+
+### Piper (local neural)
+
+[Piper](https://github.com/rhasspy/piper) runs CPU-only with Apple-silicon-fast latency (~100ms). Quality is comparable to entry-tier Deepgram and fully local. To enable:
+
+```bash
+brew install piper                        # or `pipx install piper-tts`
+mkdir -p ~/piper-voices && cd ~/piper-voices
+# Pick any voice from https://huggingface.co/rhasspy/piper-voices
+curl -LO https://huggingface.co/rhasspy/piper-voices/resolve/main/en/en_US/amy/medium/en_US-amy-medium.onnx
+curl -LO https://huggingface.co/rhasspy/piper-voices/resolve/main/en/en_US/amy/medium/en_US-amy-medium.onnx.json
+```
+
+Then in `config.json`:
+
+```json
+{
+  "primary_tts": "piper",
+  "fallback_tts": "say",
+  "piper_voice": "~/piper-voices/en_US-amy-medium.onnx"
+}
+```
+
+Each `.onnx` file ships with a sibling `.onnx.json`; both must live in the same directory. Piper voices range from ~20MB (low) to ~75MB (high) — `medium` is usually the sweet spot.
+
+### macOS `say` (local classic)
+
+Always available without configuration. The `voice` field is a Deepgram id, so when `say` is in use the plugin maps Deepgram → say voice via a lookup table. Defaults:
+
+| Deepgram voice | `say` voice |
+|---|---|
+| `aura-2-thalia-en` / `-luna-en` / `-asteria-en` | `Samantha` (en_US) |
+| `aura-2-orion-en` | `Alex` (en_US) |
+| `aura-2-zeus-en` | `Daniel` (en_GB) |
+| `aura-2-pandora-en` | `Karen` (en_AU) |
+
+Override the mapping in `config.json` to use any system voice (`say -v '?'` lists every voice on your machine):
+
+```json
+{
+  "primary_tts": "say",
+  "say_voice_map": {
+    "aura-2-thalia-en": "Reed (English (US))"
+  }
+}
+```
+
+The newer macOS voices — **Reed, Sandy, Flo, Eddy, Grandma, Grandpa, Rocko, Shelley** — sound noticeably better than legacy ones. They use Apple's newer neural engine. Some come pre-installed on macOS 14+; others can be added via System Settings → Accessibility → Spoken Content → System Voice → Manage Voices.
 
 ## How "vocal intent" is decided
 
@@ -112,8 +184,9 @@ Common fallbacks:
 | Situation | What happens |
 |---|---|
 | `ffplay` not installed | Use file-based playback (Deepgram → temp mp3 → `afplay`) |
-| Deepgram 5xx, timeout, or mid-stream error | Fall through to file-based playback, then to `say` if needed |
-| No Deepgram key configured | Speak via `say` instead |
+| Deepgram 5xx, timeout, or mid-stream error | Fall through to file-based playback, then to the configured fallback backend (`piper` or `say`) |
+| No Deepgram key configured | Skip Deepgram, speak via the fallback backend |
+| Piper binary or voice model missing | Skip Piper, fall through to `say` |
 | Haiku auth fails (when rewrite is enabled) | Speak the heuristic-stripped text raw |
 | Stripped text is empty | Stay silent for this turn |
 | Audio device unavailable | Log and stay silent |
@@ -139,7 +212,8 @@ The plugin repo itself contains code, hooks, the setup skill, the spec, and exam
 ## Roadmap (post-v1)
 
 - Overlap synthesis: kick off the next chunk's Deepgram request before the current chunk finishes streaming, so its bytes are ready the moment the previous audio drains.
-- Linux/Windows fallback (replace `say` with `espeak-ng` or Piper).
+- Piper streaming via `--output_raw` piped into `ffplay` (currently file-based).
+- Linux/Windows fallback (replace `say` with `espeak-ng`).
 - A `/voice mute` slash command for quick toggling.
 - Cost telemetry surfaced through the setup skill.
 

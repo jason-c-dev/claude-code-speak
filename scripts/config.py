@@ -46,6 +46,10 @@ class Config:
     max_haiku_chars: int = 4000
     max_deepgram_chars: int = 2000
     speech_rate: float = 1.0
+    # Path to a Piper .onnx voice model. Empty disables Piper. Tilde is expanded.
+    # Example: "~/piper-voices/en_US-amy-medium.onnx". The matching
+    # `.onnx.json` config file must sit next to it (Piper convention).
+    piper_voice: str = ""
 
 
 def plugin_root() -> Path:
@@ -174,6 +178,7 @@ def load() -> Config:
             speech_rate=_coerce_float(raw.get("speech_rate", defaults.speech_rate),
                                       defaults.speech_rate, "speech_rate", log,
                                       minimum=0.5, maximum=2.0),
+            piper_voice=str(raw.get("piper_voice", defaults.piper_voice) or ""),
         )
     except Exception as e:  # pragma: no cover — defensive last-resort
         log.error("unexpected error building Config from %s: %s", path, e)

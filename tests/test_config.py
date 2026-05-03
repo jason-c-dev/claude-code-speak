@@ -177,3 +177,29 @@ def test_tool_phrases_drops_non_string_entries(plugin_root: Path, write_config):
     assert cfg.tool_phrases["Bash"] == "executing"
     assert "Read" not in cfg.tool_phrases
     assert "Write" not in cfg.tool_phrases
+
+
+def test_piper_voice_defaults_to_empty(plugin_root: Path, write_config):
+    """Plugin works without Piper configured — empty string disables it."""
+    from scripts import config
+    write_config({"enabled": True, "mode": "A"})
+    cfg = config.load()
+    assert cfg.piper_voice == ""
+
+
+def test_piper_voice_parsed_when_provided(plugin_root: Path, write_config):
+    from scripts import config
+    write_config({
+        "enabled": True, "mode": "A",
+        "piper_voice": "~/piper-voices/en_US-amy-medium.onnx",
+    })
+    cfg = config.load()
+    assert cfg.piper_voice == "~/piper-voices/en_US-amy-medium.onnx"
+
+
+def test_piper_voice_coerces_non_string_to_empty(plugin_root: Path, write_config):
+    """A typo'd type (null, number, etc.) should not crash; just empty out."""
+    from scripts import config
+    write_config({"enabled": True, "mode": "A", "piper_voice": None})
+    cfg = config.load()
+    assert cfg.piper_voice == ""
