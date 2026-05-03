@@ -217,12 +217,20 @@ The plugin repo itself contains code, hooks, the setup skill, the spec, and exam
 - The full transcript is **not** sent to either — the plugin only reads what's needed for the current event.
 - Audio files are local. They're deleted after playback and on session end.
 
+## Slash commands
+
+| Command | What it does |
+|---|---|
+| `/speech-mute` | Toggle the plugin on/off. When muting, also kills any in-flight audio so you get immediate silence. |
+| `/speech-stop` | Stop only the audio currently playing/queued for this session, without disabling the plugin. |
+
+Named `speech-*` rather than `voice-*` to avoid clashing with Anthropic's built-in `/voice` (speech-to-text dictation).
+
 ## Roadmap (post-v1)
 
 - Overlap synthesis: kick off the next chunk's Deepgram request before the current chunk finishes streaming, so its bytes are ready the moment the previous audio drains.
 - Piper streaming via `--output_raw` piped into `ffplay` (currently file-based).
 - Linux/Windows fallback (replace `say` with `espeak-ng`).
-- A `/voice mute` slash command for quick toggling.
 - Cost telemetry surfaced through the setup skill.
 
 ## License
