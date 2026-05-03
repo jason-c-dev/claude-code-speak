@@ -10,7 +10,7 @@ if _PLUGIN_ROOT not in sys.path:
     sys.path.insert(0, _PLUGIN_ROOT)
 
 import json
-from scripts import extract, playback, state as state_mod
+from scripts import extract, playback, state as state_mod, tool_phrases
 from scripts.config import load as load_config, plugin_root
 from scripts.log import get_logger
 from scripts.transcript import last_assistant_text, wait_for_new_message
@@ -193,9 +193,40 @@ def _handle_notification(payload: dict) -> None:
     playback.enqueue(session_id, voiced)
 
 
+def _handle_pre_tool_use(payload: dict) -> None:
+    cfg = load_config()
+    log = get_logger()
+
+    # Mode A stays silent for tool work — that's the opt-out for users who
+    # find the cues chatty.
+    if cfg.mode not in ("B", "C"):
+        return
+
+    session_id = payload.get("session_id") or "default"
+
+    s = state_mod.load(session_id)
+    if not s.interactive:
+        log.info("PreToolUse: session %s not interactive; skipping", session_id)
+        return
+    if not state_mod.is_active_session(session_id):
+        log.info("PreToolUse: session %s is not the active session; skipping",
+                 session_id)
+        return
+
+    tool_name = payload.get("tool_name") or ""
+    if not tool_name:
+        log.info("PreToolUse: payload missing tool_name; skipping")
+        return
+
+    phrase = tool_phrases.lookup(tool_name, cfg.tool_phrases)
+    log.info("PreToolUse: tool=%s phrase=%r", tool_name, phrase)
+    playback.enqueue(session_id, phrase)
+
+
 _DISPATCH = {
     "Stop": _handle_stop,
     "Notification": _handle_notification,
+    "PreToolUse": _handle_pre_tool_use,
     "UserPromptSubmit": _handle_user_prompt_submit,
     "SessionStart": _handle_session_start,
     "SessionEnd": _handle_session_end,
