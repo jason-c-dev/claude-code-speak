@@ -18,24 +18,28 @@ def test_mode_a_registers_stop_and_operational(plugin_root):
     assert "Notification" not in out["hooks"]
 
 
-def test_mode_b_uses_same_hooks_as_mode_a(plugin_root):
-    """Mode B drives narration via the speak CLI from Bash, not via Pre/PostToolUse
-    scraping. Hook registration matches mode A."""
+def test_mode_b_registers_pre_tool_use(plugin_root):
+    """Mode B registers PreToolUse for pre-tool narration cues."""
     from scripts import hooks_gen
 
     out = hooks_gen.generate(mode="B")
     assert "Stop" in out["hooks"]
-    assert "PreToolUse" not in out["hooks"]
+    assert "PreToolUse" in out["hooks"]
     assert "PostToolUse" not in out["hooks"]
     assert "Notification" not in out["hooks"]
+    # Verify same command shape as other events
+    block = out["hooks"]["PreToolUse"][0]
+    assert block["matcher"] == "*"
+    assert block["hooks"][0]["type"] == "command"
+    assert "speak.py" in block["hooks"][0]["command"]
 
 
-def test_mode_c_adds_notification(plugin_root):
+def test_mode_c_registers_pre_tool_use_and_notification(plugin_root):
     from scripts import hooks_gen
 
     out = hooks_gen.generate(mode="C")
     assert "Notification" in out["hooks"]
-    assert "PreToolUse" not in out["hooks"]
+    assert "PreToolUse" in out["hooks"]
 
 
 def test_each_hook_has_command_pointing_to_speak_py(plugin_root):
