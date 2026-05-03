@@ -45,27 +45,39 @@ def wait_for_new_message(
     poll_ms: int = 100,
 ) -> "tuple[str, str] | None":
     """Poll the transcript until the latest assistant message id differs from
-    `last_spoken_id`, or until `max_ms` elapses.
+    `last_spoken_id` AND has non-empty text, or until `max_ms` elapses.
 
-    Returns (msg_id, text) for the new message, or None if no new message
-    appears within the budget. None for `last_spoken_id` matches "speak the
-    first message we see" — useful on a fresh session.
+    Returns (msg_id, text) for the new message with text, or None if no such
+    message appears within the budget. None for `last_spoken_id` matches
+    "speak the first textful message we see" — useful on a fresh session.
 
-    File-size-stability is not a reliable signal: Claude Code sometimes
-    writes the new assistant message to JSONL *after* the Stop hook has
-    run, so a stability check at hook-fire time sees a quiescent file
-    because nothing has happened yet. Anchoring on "have we seen a NEW
-    msg id" is the correct semantic — we only speak text we haven't
-    already spoken, and we wait for it to actually appear.
+    Why both "new id" AND "has text":
+
+    - Anchoring on a NEW msg id ensures we only speak text we haven't already
+      spoken. File-size-stability is not a reliable signal because Claude
+      Code sometimes writes the new assistant message to JSONL *after* the
+      Stop hook fires.
+    - Requiring non-empty text guards against an interim assistant message
+      that consists only of thinking/tool_use blocks (no text yet). Without
+      this guard, `last_assistant_text` returns `(new_id, "")`, the caller
+      sees a "new" message, strips it to empty, and silently skips — leaving
+      the user wondering why nothing spoke.
+
+    The fall-through case is when the model's turn legitimately ends with no
+    text (e.g. tools-only). After max_ms, we return None and skip — speaking
+    nothing in that case is the right behavior.
     """
     if transcript_path is None:
         return None
     deadline = time.monotonic() + max_ms / 1000.0
     poll_seconds = poll_ms / 1000.0
-    last_seen: tuple[str, str] | None = None
     while True:
         last_seen = last_assistant_text(transcript_path)
-        if last_seen is not None and last_seen[0] != last_spoken_id:
+        if (
+            last_seen is not None
+            and last_seen[0] != last_spoken_id
+            and last_seen[1]  # non-empty text
+        ):
             return last_seen
         if time.monotonic() >= deadline:
             return None
