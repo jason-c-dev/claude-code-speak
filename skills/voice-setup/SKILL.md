@@ -17,8 +17,7 @@ Be concise. One short prompt at a time. Use the Bash tool for commands and the E
 tools for files. Do NOT speak to them via the plugin during setup — that's the smoke test
 at the end.
 
-The plugin lives at `${CLAUDE_PLUGIN_ROOT}` (in this case `/Users/jason/dev/claude-chat`).
-Per-user data and secrets live at `~/.claude/voice/`.
+The plugin lives at `${CLAUDE_PLUGIN_ROOT}`. Per-user data and secrets live at `~/.claude/voice/`.
 
 ## Step 1 — Pre-flight
 
@@ -79,12 +78,8 @@ If the user wants to preview voices and Deepgram is configured, synthesize a 5-w
 preview for each candidate by running:
 
 ```
-python3 -c "
-from scripts import tts
+cd "${CLAUDE_PLUGIN_ROOT}" && python3 -c "
 import os
-os.environ.setdefault('CLAUDE_PLUGIN_ROOT', '/Users/jason/dev/claude-chat')
-# Temporarily override config voice via env (requires test path)
-# Or — simpler — just call _synthesize_deepgram directly:
 from scripts.tts import _synthesize_deepgram
 p = _synthesize_deepgram(text='Hi, this is the voice', voice='<voice-id>',
                          api_key=os.environ['DEEPGRAM_API_KEY'],
@@ -101,14 +96,14 @@ Ask: "Which mode?
 
 - **A (default)** — Claude speaks only the final response of each turn (deterministic,
   hook-driven).
-- **B** — Same as A, plus Claude narrates short cues before tool calls (e.g.
-  'Looking that up') by invoking the speak CLI from Bash. The pre-tool
-  narration depends on Claude remembering to call it, so coverage isn't
-  guaranteed; the end-of-turn speech is.
+- **B** — Same as A, plus deterministic short cues before every tool call
+  ('running this', 'reading', 'looking that up', etc.) via a hook-driven
+  PreToolUse event. Both end-of-turn and pre-tool speech are fully
+  hook-driven; nothing depends on Claude remembering to narrate.
 - **C** — Final response plus distinct alerts when Claude needs your attention.
 
-(A is the safe default. B is more 'alive' but the pre-tool cues are best-effort.
-Try A first.)"
+(A is the safe default — silent for tool work. B is more 'alive' with
+audible cues for every tool call. Try A first if you're unsure.)"
 
 ## Step 5 — Write config.json
 
@@ -131,7 +126,7 @@ Build the config object based on the user's picks and write to `${CLAUDE_PLUGIN_
 Run:
 
 ```
-cd /Users/jason/dev/claude-chat
+cd "${CLAUDE_PLUGIN_ROOT}"
 python3 -c "from scripts.hooks_gen import write; from pathlib import Path; \
 import json; cfg = json.load(open('config.json')); \
 write(mode=cfg['mode'], out_path=Path('hooks/hooks.json'))"
@@ -146,10 +141,7 @@ Synthesize and play "Voice setup complete. I'm ready to talk." through the same
 pipeline the hooks would use:
 
 ```
-python3 -c "
-import os, sys
-os.environ.setdefault('CLAUDE_PLUGIN_ROOT', '/Users/jason/dev/claude-chat')
-sys.path.insert(0, '/Users/jason/dev/claude-chat')
+cd "${CLAUDE_PLUGIN_ROOT}" && python3 -c "
 from scripts import tts
 p = tts.synthesize(\"Voice setup complete. I'm ready to talk.\")
 print('audio:', p)
