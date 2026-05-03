@@ -4,12 +4,10 @@ import json
 from pathlib import Path
 
 OPERATIONAL_EVENTS = ("UserPromptSubmit", "SessionStart", "SessionEnd")
-# Mode B uses the same hooks as A; live narration in B is driven by the
-# assistant invoking scripts/speak_cli.py via Bash, not by hook scraping.
 MODE_EVENTS = {
     "A": ("Stop",),
-    "B": ("Stop",),
-    "C": ("Stop", "Notification"),
+    "B": ("Stop", "PreToolUse"),
+    "C": ("Stop", "PreToolUse", "Notification"),
 }
 
 # Hook command: invoke our entrypoint via the plugin-root-relative path.

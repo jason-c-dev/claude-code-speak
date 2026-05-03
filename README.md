@@ -17,10 +17,10 @@ A Claude Code plugin that gives Claude a spoken voice. The natural-language part
 | Mode | When Claude speaks |
 |---|---|
 | **A** (default) | Final response only — one clip per turn. Fully hook-driven and deterministic. |
-| **B** | Same as A, plus Claude narrates short cues ("Looking that up", "Pulling it up") before tool calls by invoking a CLI from Bash. End-of-turn speech is deterministic; pre-tool cues are best-effort (Claude has to remember to call the CLI). |
+| **B** | Same as A, plus automatic short cues ("Looking that up", "Pulling it up") before tool calls via a hook-driven PreToolUse event. Both end-of-turn and pre-tool speech are fully deterministic and hook-driven. `speak_cli` is reserved for between-tool interjections only. |
 | **C** | Final response plus distinct alerts when Claude hits a `Notification` event (asks for permission, signals a blocker, etc.). |
 
-Mode is set via `config.json`. The setup skill regenerates `hooks/hooks.json` so only the hooks for the current mode are registered. In mode B, a `SessionStart` hook injects narration instructions into Claude's session context so it knows when and how to call the speak CLI.
+Mode is set via `config.json`. The setup skill regenerates `hooks/hooks.json` so only the hooks for the current mode are registered. In mode B, a `SessionStart` hook injects instructions forbidding Claude from narrating tool calls (the PreToolUse hook handles this deterministically) and reserving `speak_cli` for optional interjections between tool calls.
 
 ## Requirements
 

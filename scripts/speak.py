@@ -10,28 +10,33 @@ if _PLUGIN_ROOT not in sys.path:
     sys.path.insert(0, _PLUGIN_ROOT)
 
 import json
-from scripts import extract, playback, state as state_mod
+from scripts import extract, playback, state as state_mod, tool_phrases
 from scripts.config import load as load_config, plugin_root
 from scripts.log import get_logger
 from scripts.transcript import last_assistant_text, wait_for_new_message
 
 
 def _mode_b_narration_instructions() -> str:
-    """Instructions Claude needs to narrate via the speak CLI in mode B."""
+    """Instructions Claude needs for non-tool interjections in mode B.
+
+    Tool cues are handled automatically by the PreToolUse hook — the model
+    must NOT narrate tool calls itself, or the user hears double-speak (hook
+    says 'running this,' model says 'Looking that up'). speak_cli is reserved
+    for interjections between tool calls."""
     cli = plugin_root() / "scripts" / "speak_cli.py"
     return (
-        "Claude Voice mode B is active. Before issuing a tool call that may "
-        "take more than a moment (web fetches, searches, file reads on "
-        "unfamiliar code, MCP calls, etc.), narrate a short cue out loud by "
-        "running this Bash command IMMEDIATELY before the tool call:\n\n"
-        f"    python3 \"{cli}\" \"<short cue>\"\n\n"
-        "The cue should be 2-6 conversational words like \"Looking that up\", "
-        "\"Pulling it up\", \"Checking now\", \"On it\". Keep it varied and "
-        "natural. Only narrate when the wait would be noticeable; don't "
-        "narrate trivial reads or quick edits. The CLI returns immediately; "
-        "audio plays in the background and won't slow you down. Final-response "
-        "speech at end of turn is automatic — you don't need to call the CLI "
-        "for that."
+        "Claude Voice mode B is active. Tool cues are handled automatically "
+        "by a PreToolUse hook — DO NOT narrate before tool calls yourself. "
+        "Doing so causes the user to hear two phrases for one tool.\n\n"
+        "speak_cli is reserved for short interjections BETWEEN tool calls "
+        "(not before them) — moments like 'hmm, that's odd,' 'that didn't "
+        "work, let me try something else,' or 'interesting.' Invoke via Bash:\n\n"
+        f"    python3 \"{cli}\" \"<short remark>\"\n\n"
+        "Keep it varied (2-6 words) and use it sparingly — only when the "
+        "remark adds something the user wouldn't get from the audible tool "
+        "cue plus the visual transcript. The CLI returns immediately; audio "
+        "plays in the background. Final-response speech at end of turn is "
+        "automatic — don't call the CLI for that either."
     )
 
 
@@ -193,9 +198,40 @@ def _handle_notification(payload: dict) -> None:
     playback.enqueue(session_id, voiced)
 
 
+def _handle_pre_tool_use(payload: dict) -> None:
+    cfg = load_config()
+    log = get_logger()
+
+    # Mode A stays silent for tool work — that's the opt-out for users who
+    # find the cues chatty.
+    if cfg.mode not in ("B", "C"):
+        return
+
+    session_id = payload.get("session_id") or "default"
+
+    s = state_mod.load(session_id)
+    if not s.interactive:
+        log.info("PreToolUse: session %s not interactive; skipping", session_id)
+        return
+    if not state_mod.is_active_session(session_id):
+        log.info("PreToolUse: session %s is not the active session; skipping",
+                 session_id)
+        return
+
+    tool_name = payload.get("tool_name") or ""
+    if not tool_name:
+        log.info("PreToolUse: payload missing tool_name; skipping")
+        return
+
+    phrase = tool_phrases.lookup(tool_name, cfg.tool_phrases)
+    log.info("PreToolUse: tool=%s phrase=%r", tool_name, phrase)
+    playback.enqueue(session_id, phrase)
+
+
 _DISPATCH = {
     "Stop": _handle_stop,
     "Notification": _handle_notification,
+    "PreToolUse": _handle_pre_tool_use,
     "UserPromptSubmit": _handle_user_prompt_submit,
     "SessionStart": _handle_session_start,
     "SessionEnd": _handle_session_end,
