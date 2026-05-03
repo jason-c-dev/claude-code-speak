@@ -43,45 +43,78 @@ def wait_for_new_message(
     *,
     max_ms: int = 5000,
     poll_ms: int = 100,
+    settle_ms: int = 800,
 ) -> "tuple[str, str] | None":
-    """Poll the transcript until the latest assistant message id differs from
-    `last_spoken_id` AND has non-empty text, or until `max_ms` elapses.
+    """Poll the transcript for the FINAL textful assistant message of the
+    current turn (i.e. the one the user most likely wants to hear).
 
-    Returns (msg_id, text) for the new message with text, or None if no such
-    message appears within the budget. None for `last_spoken_id` matches
-    "speak the first textful message we see" — useful on a fresh session.
+    Two phases:
 
-    Why both "new id" AND "has text":
+    1. **Find phase**: poll until `last_assistant_text` returns a message
+       whose id differs from `last_spoken_id` AND has non-empty text.
+    2. **Settle phase**: keep polling. If a *newer* textful message id
+       appears, switch to it and reset the settle clock. When the latest
+       textful id has been stable for `settle_ms`, return it.
 
-    - Anchoring on a NEW msg id ensures we only speak text we haven't already
-      spoken. File-size-stability is not a reliable signal because Claude
-      Code sometimes writes the new assistant message to JSONL *after* the
-      Stop hook fires.
-    - Requiring non-empty text guards against an interim assistant message
-      that consists only of thinking/tool_use blocks (no text yet). Without
-      this guard, `last_assistant_text` returns `(new_id, "")`, the caller
-      sees a "new" message, strips it to empty, and silently skips — leaving
-      the user wondering why nothing spoke.
+    Returns `(msg_id, text)` for the settled final message, or `None` if no
+    textful new message appears within `max_ms`.
 
-    The fall-through case is when the model's turn legitimately ends with no
-    text (e.g. tools-only). After max_ms, we return None and skip — speaking
+    **Why two phases:**
+
+    - **Find** ensures we only speak text we haven't already spoken (stability
+      checks alone are unreliable because Claude Code sometimes writes the
+      new message to JSONL *after* the Stop hook fires).
+    - **Settle** handles the case where multiple text-bearing messages flush
+      in close succession. Without it, the function returns the FIRST
+      textful new message — but a multi-step turn ("Tests pass. Committing:"
+      → tool calls → "Fix is in...") writes several textful messages, and
+      the user wants the *final* summary, not the intermediate progress
+      note. The settle window lets later messages overtake earlier ones
+      before we commit to speaking.
+    - Requiring non-empty text in both phases skips interim
+      thinking/tool_use-only messages that have no text content yet.
+
+    The fall-through case is a turn that legitimately ends with no text
+    (tools-only). After `max_ms`, return `None` and skip — speaking
     nothing in that case is the right behavior.
     """
     if transcript_path is None:
         return None
     deadline = time.monotonic() + max_ms / 1000.0
     poll_seconds = poll_ms / 1000.0
+    settle_seconds = settle_ms / 1000.0
+
+    # Phase 1: find the first textful new message.
+    seen: tuple[str, str] | None = None
     while True:
-        last_seen = last_assistant_text(transcript_path)
+        candidate = last_assistant_text(transcript_path)
         if (
-            last_seen is not None
-            and last_seen[0] != last_spoken_id
-            and last_seen[1]  # non-empty text
+            candidate is not None
+            and candidate[0] != last_spoken_id
+            and candidate[1]
         ):
-            return last_seen
+            seen = candidate
+            break
         if time.monotonic() >= deadline:
             return None
         time.sleep(poll_seconds)
+
+    # Phase 2: keep polling; if a newer textful message appears, switch to
+    # it and reset the settle clock. Return when the latest has been stable
+    # for settle_ms.
+    last_change = time.monotonic()
+    while time.monotonic() < deadline:
+        time.sleep(poll_seconds)
+        current = last_assistant_text(transcript_path)
+        if current is None or not current[1]:
+            # textless interim — ignore, keep waiting
+            continue
+        if current[0] != seen[0]:
+            seen = current
+            last_change = time.monotonic()
+        elif time.monotonic() - last_change >= settle_seconds:
+            return seen
+    return seen
 
 
 def last_assistant_text(transcript_path: Path) -> tuple[str, str] | None:

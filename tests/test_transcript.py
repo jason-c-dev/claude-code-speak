@@ -79,7 +79,8 @@ def test_only_uses_text_from_most_recent_message_id(tmp_path):
 
 def test_wait_for_new_message_returns_immediately_when_already_new(tmp_path):
     """Common case: by the time Stop runs, the new message is already in
-    JSONL with an id different from last_spoken_id. Should return fast."""
+    JSONL with an id different from last_spoken_id. Should return after the
+    settle window (no newer messages → it's stable)."""
     from scripts.transcript import wait_for_new_message
 
     p = tmp_path / "t.jsonl"
@@ -89,10 +90,44 @@ def test_wait_for_new_message_returns_immediately_when_already_new(tmp_path):
     ])
     started = time.monotonic()
     res = wait_for_new_message(p, last_spoken_id="msg_OLD",
-                               max_ms=2000, poll_ms=50)
+                               max_ms=2000, poll_ms=50, settle_ms=200)
     elapsed = time.monotonic() - started
     assert res == ("msg_NEW", "hello")
-    assert elapsed < 0.3, f"should return immediately when new id present, took {elapsed:.2f}s"
+    # Should return after roughly settle_ms once stable, not blow through max_ms
+    assert 0.18 < elapsed < 0.6, \
+        f"should return shortly after settle window, took {elapsed:.2f}s"
+
+
+def test_wait_for_new_message_settles_on_latest_when_multiple_textful_messages_arrive(tmp_path):
+    """Production bug: a multi-step turn writes several textful messages
+    in sequence ('Tests pass.' → tools → 'Fix is in...'). The function
+    must return the LATEST one, not the first textful one it sees."""
+    from scripts.transcript import wait_for_new_message
+
+    p = tmp_path / "t.jsonl"
+    _write_transcript(p, [
+        {"type": "assistant",
+         "message": {"id": "msg_PREV", "content": [{"type": "text", "text": "previous turn"}]}},
+        {"type": "assistant",
+         "message": {"id": "msg_INTERIM", "content": [{"type": "text", "text": "Tests pass."}]}},
+    ])
+
+    def _writer():
+        time.sleep(0.20)
+        with open(p, "a") as f:
+            f.write(json.dumps({
+                "type": "assistant",
+                "message": {"id": "msg_FINAL",
+                            "content": [{"type": "text", "text": "Fix is in. Done."}]},
+            }) + "\n")
+
+    t = threading.Thread(target=_writer, daemon=True)
+    t.start()
+    res = wait_for_new_message(p, last_spoken_id="msg_PREV",
+                               max_ms=3000, poll_ms=50, settle_ms=300)
+    t.join()
+    assert res == ("msg_FINAL", "Fix is in. Done."), \
+        f"should settle on the LAST textful message, not the interim one; got {res}"
 
 
 def test_wait_for_new_message_waits_for_late_write(tmp_path):
