@@ -66,6 +66,22 @@ def test_still_drops_path_with_slash_and_dot():
         == "Open and read it carefully"
     assert strip_for_voice("Run `./scripts/build.sh` in your terminal now") \
         == "Run in your terminal now"
+    # Multi-segment absolute paths still drop.
+    assert strip_for_voice("Check `/etc/hosts` for the entry now") \
+        == "Check for the entry now"
+
+
+def test_unwraps_slash_commands_as_spoken_words():
+    """Slash commands like `/reload-plugins` and `/voice` look path-ish
+    (leading /) but are commands the user runs in chat. They must be
+    spoken — single-segment tokens after a leading slash are commands,
+    not absolute paths."""
+    assert strip_for_voice("Run `/reload-plugins` to pick up the change now") \
+        == "Run reload-plugins to pick up the change now"
+    assert strip_for_voice("The command `/voice` is built into the harness") \
+        == "The command voice is built into the harness"
+    assert strip_for_voice("Use `/help` to see the available commands today") \
+        == "Use help to see the available commands today"
 
 
 def test_drops_sha_like_inline_code():

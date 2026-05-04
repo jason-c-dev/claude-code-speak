@@ -19,18 +19,26 @@ def _looks_like_path(s: str) -> bool:
     """Heuristic for filesystem paths inside backticks.
 
     Path-shaped (drop): `~/foo/bar`, `/etc/hosts`, `./script.sh`, `src/main.py`.
-    Not path-shaped (keep): `origin/main`, `feat/auth-rewrite`, `refs/heads/main`.
+    Not path-shaped (keep): `origin/main`, `feat/auth-rewrite`,
+    `refs/heads/main`, `/reload-plugins` (slash command).
 
     Rule of thumb: a `/`-containing token is a path only if it also has a
-    file-extension dot or starts with a path separator. Bare `a/b` tokens
-    are git refs / namespaces and read fine aloud.
+    file-extension dot, starts with a relative-path prefix (`~/`, `./`),
+    or is a multi-segment absolute path (leading `/` with another `/`
+    after the first segment). A leading `/` with a single segment after it
+    is almost always a slash command (`/reload-plugins`, `/voice`, `/help`),
+    not a filesystem path.
     """
     if "/" not in s:
         return False
     if "." in s:
         return True
-    if s.startswith(("~/", "/", "./")):
+    if s.startswith(("~/", "./")):
         return True
+    if s.startswith("/"):
+        # Absolute path requires at least two `/` (e.g. `/usr/bin`); a single
+        # leading `/` alone means slash command, not path.
+        return s.count("/") > 1
     return False
 
 
