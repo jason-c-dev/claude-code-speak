@@ -155,7 +155,7 @@ def test_sessionend_removes_state_and_tmp(voice_home, plugin_root, write_config)
 
 def test_notification_speaks_message_in_mode_C(voice_home, plugin_root,
                                                  write_config, monkeypatch):
-    write_config({"enabled": True, "mode": "C"})
+    write_config({"enabled": True, "mode": "C", "rewrite": True})
     from scripts import speak, extract, playback, state as state_mod
 
     s = state_mod.load("S")

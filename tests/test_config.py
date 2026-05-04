@@ -21,7 +21,7 @@ def test_defaults_apply_when_keys_missing(plugin_root: Path, write_config):
     assert cfg.voice == "aura-2-thalia-en"
     assert cfg.primary_tts == "deepgram"
     assert cfg.fallback_tts == "say"
-    assert cfg.rewrite is True
+    assert cfg.rewrite is False
     assert cfg.min_words == 3
     assert cfg.max_haiku_chars == 4000
     assert cfg.max_deepgram_chars == 2000

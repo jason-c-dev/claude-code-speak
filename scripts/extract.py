@@ -31,7 +31,7 @@ def _is_speakable_inline(content: str) -> bool:
         return False
     if any(c in s for c in _CODELIKE_CHARS):
         return False
-    if "_" in s:  # any underscore looks like an identifier (snake_case, dunders)
+    if "__" in s:  # dunders (Python __methods__, MCP tool names) sound awful
         return False
     if _SHA_LIKE.match(s):
         return False
@@ -151,9 +151,15 @@ def _is_emoji(ch: str) -> bool:
 
 
 def _unwrap_or_drop_inline(match: re.Match) -> str:
-    """Backtick content → spoken word if speakable, dropped otherwise."""
+    """Backtick content → spoken word if speakable, dropped otherwise.
+
+    Single underscores are replaced with spaces so snake_case identifiers
+    (`speak_cli`, `pre_tool_use`) read as natural words instead of being
+    dropped wholesale or spelled out."""
     inner = match.group(0)[1:-1]  # strip the surrounding backticks
-    return inner if _is_speakable_inline(inner) else " "
+    if not _is_speakable_inline(inner):
+        return " "
+    return inner.replace("_", " ")
 
 
 def strip_for_voice(text: str, min_words: int = MIN_WORDS_DEFAULT) -> str:

@@ -31,8 +31,17 @@ def test_drops_dunder_identifiers():
     awful read aloud."""
     assert strip_for_voice("Calling `mcp__claude_ai_Gmail__search_threads` for that") \
         == "Calling for that"
-    assert strip_for_voice("The `_handle_pre_tool_use` function gates the cue properly") \
-        == "The function gates the cue properly"
+    assert strip_for_voice("The `__init__` method runs at construction time") \
+        == "The method runs at construction time"
+
+
+def test_unwraps_snake_case_as_spoken_words():
+    """Snake_case identifiers (single underscores, no dunders) get unwrapped
+    with underscores replaced by spaces so they read as natural words."""
+    assert strip_for_voice("Use `speak_cli` for between-tool interjections only") \
+        == "Use speak cli for between-tool interjections only"
+    assert strip_for_voice("The `pre_tool_use` hook fires automatically now") \
+        == "The pre tool use hook fires automatically now"
 
 
 def test_drops_sha_like_inline_code():

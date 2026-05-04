@@ -14,7 +14,7 @@ def test_stop_pipeline_strip_voicify_enqueues_text(voice_home, plugin_root,
                                                     write_config, monkeypatch, tmp_path):
     """The Stop pipeline strips, voicifies, chunks, and enqueues each chunk
     as text for the player loop to stream-synthesize."""
-    write_config({"enabled": True, "mode": "A"})
+    write_config({"enabled": True, "mode": "A", "rewrite": True})
 
     # Build a transcript with a final assistant message containing prose + code.
     transcript = tmp_path / "session.jsonl"

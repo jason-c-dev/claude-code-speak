@@ -117,7 +117,7 @@ Build the config object based on the user's picks and write to `${CLAUDE_PLUGIN_
   "voice": "<chosen-voice-id>",
   "primary_tts": "<deepgram or say>",
   "fallback_tts": "say",
-  "rewrite": true,
+  "rewrite": false,
   "speech_rate": 1.0
 }
 ```

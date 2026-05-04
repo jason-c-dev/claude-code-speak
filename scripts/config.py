@@ -40,7 +40,7 @@ class Config:
     tool_phrases: Mapping[str, str] = field(
         default_factory=lambda: MappingProxyType({})
     )
-    rewrite: bool = True
+    rewrite: bool = False
     haiku_model: str = "claude-haiku-4-5-20251001"
     min_words: int = 3
     max_haiku_chars: int = 4000

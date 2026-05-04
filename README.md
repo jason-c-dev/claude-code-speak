@@ -10,7 +10,7 @@ A Claude Code plugin that gives Claude a spoken voice. The natural-language part
 
 ## What it does
 
-- Hooks into Claude Code's `Stop` event (and optionally `Notification`) to extract the speakable prose from each turn.
+- Hooks into Claude Code's `Stop` event (always), `PreToolUse` in Mode B for short tool cues, and `Notification` in Mode C, to extract or generate the speakable text for each event.
 - Strips code blocks, file paths, URLs, and markdown formatting so only natural sentences remain.
 - Optionally runs the result through Claude Haiku 4.5 to lightly polish phrasing (off by default — see `config.rewrite`).
 - Sends the polished text to Deepgram Aura-2 for high-quality TTS, with `say` as a local fallback if Deepgram is unconfigured or unreachable.
@@ -61,7 +61,7 @@ git clone https://github.com/jason-c-dev/claude-code-speak ~/dev/claude-code-spe
 Then ask Claude to set it up:
 
 ```
-> set up voice
+> set up speech
 ```
 
 The setup skill walks you through installing the Python dependency (`claude-agent-sdk`), entering your Deepgram key (or skipping for `say`-only mode), picking a voice, picking a mode, and running a smoke test. About a minute, end to end.
@@ -79,7 +79,7 @@ Plugin-level config lives in `config.json` at the repo root. The setup skill reg
   "fallback_tts": "say",
   "piper_voice": "",
   "say_voice_map": {},
-  "rewrite": true,
+  "rewrite": false,
   "speech_rate": 1.0
 }
 ```
@@ -209,7 +209,9 @@ Common fallbacks:
 └── tmp/<uuid>.{mp3,aiff}      # transient audio, deleted after playback
 ```
 
-The plugin repo itself contains code, hooks, the setup skill, the spec, and example config. No user data lives in the repo.
+The plugin repo itself contains code, hooks, the setup skill, and example config. No user data lives in the repo.
+
+The user-data directory stays at `~/.claude/voice/` even though the plugin renamed from `claude-voice` to `claude-speech`. Keeping the path stable means existing setups (your Deepgram key, voice log, session state) survive the rename without migration.
 
 ## Privacy
 
