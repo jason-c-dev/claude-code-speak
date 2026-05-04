@@ -32,7 +32,7 @@ Mode is set via `config.json`. The setup skill regenerates `hooks/hooks.json` so
 
 - macOS (the `say` fallback is Darwin-only)
 - Python 3.10+
-- [Claude Code](https://claude.com/claude-code) with a Max plan (only needed if you re-enable the Haiku rewrite step; off by default)
+- [Claude Code](https://claude.com/claude-code)
 - Optional but recommended: a [Deepgram](https://deepgram.com) API key (free tier works; Aura-2 voices are well above `say` quality)
 - Optional but recommended: `ffplay` from `ffmpeg` (`brew install ffmpeg`). With `ffplay`, audio streams directly from Deepgram for ~1s time-to-first-audio. Without it, the plugin falls back to writing temp mp3s and playing with `afplay`.
 - Optional: [Piper](https://github.com/rhasspy/piper) for local neural TTS that beats `say` quality without needing a network. See the [Voices](#voices) section below.
@@ -178,10 +178,10 @@ The newer macOS voices — **Reed, Sandy, Flo, Eddy, Grandma, Grandpa, Rocko, Sh
 You don't write speech tags. The plugin extracts speech in three steps:
 
 1. **Strip** — drop code blocks, inline code, file paths, URLs, markdown, emoji.
-2. **Rewrite** — pass the stripped text through Claude Haiku 4.5 with a prompt that says: "rewrite as one or two natural spoken sentences, or return empty if there's nothing worth saying aloud."
+2. **Rewrite** (optional, off by default) — if `config.rewrite` is `true`, the stripped text is passed through Claude Haiku 4.5 with a prompt that says: "rewrite as one or two natural spoken sentences, or return empty if there's nothing worth saying aloud." This step requires a Claude Code Max plan (or API auth) to call Haiku; with rewrite off, the stripped text is spoken directly.
 3. **Synthesize** — Aura-2 turns it into audio.
 
-Haiku returning the empty string is a valid signal — Claude says nothing aloud for that turn. Pure tool-use turns naturally produce nothing speakable and stay silent.
+When rewrite is enabled, Haiku returning the empty string is a valid signal — Claude says nothing aloud for that turn. Pure tool-use turns naturally produce nothing speakable and stay silent.
 
 ## Failure behavior
 
