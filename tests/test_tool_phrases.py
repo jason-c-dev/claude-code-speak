@@ -67,7 +67,7 @@ def test_defaults_are_immutable():
 
 def test_lookup_inserts_basename_for_edit():
     from scripts.tool_phrases import lookup
-    assert lookup("Edit", tool_input={"file_path": "/Users/jason/dev/claude-chat/scripts/speak.py"}) \
+    assert lookup("Edit", tool_input={"file_path": "/Users/jason/dev/claude-code-speak/scripts/speak.py"}) \
         == "editing speak.py"
 
 

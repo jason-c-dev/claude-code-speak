@@ -218,7 +218,7 @@ def test_pre_tool_use_renders_basename_from_tool_input(
     payload = {
         "hook_event_name": "PreToolUse", "session_id": "S",
         "tool_name": "Edit",
-        "tool_input": {"file_path": "/Users/jason/dev/claude-chat/scripts/speak.py"},
+        "tool_input": {"file_path": "/Users/jason/dev/claude-code-speak/scripts/speak.py"},
     }
     speak.run(json.dumps(payload))
     assert enqueued == [("S", "editing speak.py")]
