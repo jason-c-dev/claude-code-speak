@@ -1,18 +1,19 @@
 ---
-name: voice-setup
-description: Configure or change Claude Voice — install deps, set the Deepgram API key, pick a voice and a mode (A/B/C), regenerate hooks.json, smoke test.
+name: speech-setup
+description: Configure or change Claude Speech — install deps, set the Deepgram API key, pick a voice and a mode (A/B/C), regenerate hooks.json, smoke test.
 triggers:
-  - set up voice
-  - configure voice
+  - set up speech
+  - configure speech
+  - change speech mode
+  - install speech plugin
+  - speech setup
   - change voice
-  - change voice mode
-  - install voice plugin
-  - voice setup
+  - set up voice
 ---
 
-# Claude Voice — Setup Skill
+# Claude Speech — Setup Skill
 
-You are walking the user through configuring (or reconfiguring) the Claude Voice plugin.
+You are walking the user through configuring (or reconfiguring) the Claude Speech plugin.
 Be concise. One short prompt at a time. Use the Bash tool for commands and the Edit/Write
 tools for files. Do NOT speak to them via the plugin during setup — that's the smoke test
 at the end.

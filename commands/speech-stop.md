@@ -1,8 +1,8 @@
 ---
-description: Stop any audio Claude Voice is currently playing or has queued for this session.
+description: Stop any audio Claude Speech is currently playing or has queued for this session.
 ---
 
-Stop any in-flight Claude Voice audio for the current session. The plugin's
+Stop any in-flight Claude Speech audio for the current session. The plugin's
 playback is per-session, so we need to clear the queue and SIGTERM the player
 process (and its `afplay` child) for this Claude Code session id.
 

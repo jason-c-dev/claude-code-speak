@@ -1,4 +1,4 @@
-# Claude Voice
+# Claude Speech
 
 [![License: MIT](https://img.shields.io/badge/license-MIT-yellow.svg)](LICENSE)
 [![Python 3.10+](https://img.shields.io/badge/python-3.10%2B-blue.svg)](https://www.python.org/downloads/)
@@ -43,7 +43,7 @@ Inside a Claude Code session:
 
 ```
 /plugin marketplace add jason-c-dev/claude-code-speak
-/plugin install claude-voice@claude-code-speak
+/plugin install claude-speech@claude-code-speak
 /reload-plugins
 ```
 
@@ -54,7 +54,7 @@ git clone https://github.com/jason-c-dev/claude-code-speak ~/dev/claude-code-spe
 ```
 ```
 /plugin marketplace add ~/dev/claude-code-speak
-/plugin install claude-voice@claude-code-speak
+/plugin install claude-speech@claude-code-speak
 /reload-plugins
 ```
 

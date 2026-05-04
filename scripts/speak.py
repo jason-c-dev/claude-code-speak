@@ -25,7 +25,7 @@ def _mode_b_narration_instructions() -> str:
     for interjections between tool calls."""
     cli = plugin_root() / "scripts" / "speak_cli.py"
     return (
-        "Claude Voice mode B is active. Tool cues are handled automatically "
+        "Claude Speech mode B is active. Tool cues are handled automatically "
         "by a PreToolUse hook — DO NOT narrate before tool calls yourself. "
         "Doing so causes the user to hear two phrases for one tool.\n\n"
         "speak_cli is reserved for short interjections BETWEEN tool calls "

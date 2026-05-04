@@ -1,4 +1,4 @@
-"""Shared pytest fixtures for claude-voice tests."""
+"""Shared pytest fixtures for claude-speech tests."""
 from __future__ import annotations
 import json
 import sys

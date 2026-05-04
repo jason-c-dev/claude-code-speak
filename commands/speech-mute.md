@@ -1,5 +1,5 @@
 ---
-description: Toggle Claude Voice on or off (and stop any audio currently playing).
+description: Toggle Claude Speech on or off (and stop any audio currently playing).
 ---
 
 Toggle the plugin's `enabled` flag in `config.json`. If muting, also stop any
