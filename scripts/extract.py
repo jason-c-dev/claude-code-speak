@@ -6,10 +6,32 @@ import unicodedata
 
 # Chars that mark `inline` content as code rather than English.
 # Any of these → drop the span; otherwise unwrap and speak it.
-_CODELIKE_CHARS = set("/\\(){}[]=;|&")
+# Note: `/` is NOT in this set — it's path-like only when paired with a dot
+# or a leading separator (see _looks_like_path). A bare `origin/main` is a
+# git ref, not a path, and should be spoken.
+_CODELIKE_CHARS = set("\\(){}[]=;|&")
 # Git-SHA-like: 7+ hex chars, optionally followed by `..` or `...` and another SHA
 # (revision ranges from `git log A..B` / `git diff A...B`).
 _SHA_LIKE = re.compile(r"^[0-9a-f]{7,40}(?:\.{2,3}[0-9a-f]{7,40})?$")
+
+
+def _looks_like_path(s: str) -> bool:
+    """Heuristic for filesystem paths inside backticks.
+
+    Path-shaped (drop): `~/foo/bar`, `/etc/hosts`, `./script.sh`, `src/main.py`.
+    Not path-shaped (keep): `origin/main`, `feat/auth-rewrite`, `refs/heads/main`.
+
+    Rule of thumb: a `/`-containing token is a path only if it also has a
+    file-extension dot or starts with a path separator. Bare `a/b` tokens
+    are git refs / namespaces and read fine aloud.
+    """
+    if "/" not in s:
+        return False
+    if "." in s:
+        return True
+    if s.startswith(("~/", "/", "./")):
+        return True
+    return False
 
 
 def _is_speakable_inline(content: str) -> bool:
@@ -22,6 +44,7 @@ def _is_speakable_inline(content: str) -> bool:
         Edit → True            mcp__x__y → False (dunder)
         config.json → True     a(b, c) → False (parens)
         running this → True    f43f52a → False (hex SHA)
+        origin/main → True     src/main.py → False (path: dot + slash)
         aura-2-thalia → True   verylongidentifierthatwouldsoundbad → False (>30 chars)
     """
     s = content.strip()
@@ -30,6 +53,8 @@ def _is_speakable_inline(content: str) -> bool:
     if "://" in s:
         return False
     if any(c in s for c in _CODELIKE_CHARS):
+        return False
+    if _looks_like_path(s):
         return False
     if "__" in s:  # dunders (Python __methods__, MCP tool names) sound awful
         return False
@@ -153,13 +178,13 @@ def _is_emoji(ch: str) -> bool:
 def _unwrap_or_drop_inline(match: re.Match) -> str:
     """Backtick content → spoken word if speakable, dropped otherwise.
 
-    Single underscores are replaced with spaces so snake_case identifiers
-    (`speak_cli`, `pre_tool_use`) read as natural words instead of being
-    dropped wholesale or spelled out."""
+    Single underscores and slashes are replaced with spaces so identifiers
+    like `speak_cli` and refs like `origin/main` read as natural words
+    instead of being spelled out as "underscore" / "slash"."""
     inner = match.group(0)[1:-1]  # strip the surrounding backticks
     if not _is_speakable_inline(inner):
         return " "
-    return inner.replace("_", " ")
+    return inner.replace("_", " ").replace("/", " ")
 
 
 def strip_for_voice(text: str, min_words: int = MIN_WORDS_DEFAULT) -> str:

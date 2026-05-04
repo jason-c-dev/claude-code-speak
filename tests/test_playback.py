@@ -34,10 +34,15 @@ def test_enqueue_appends_to_queue(voice_home, monkeypatch):
 
 
 def test_clear_and_kill(voice_home, monkeypatch):
+    """clear_and_kill must SIGTERM the player's *process group* (not just its
+    pid) so any ffplay/afplay child it spawned dies too. Monkeypatch killpg
+    rather than kill — kill is only the PermissionError fallback path."""
     from scripts import playback, state
 
     killed = []
-    monkeypatch.setattr(playback.os, "kill", lambda pid, sig: killed.append((pid, sig)))
+    monkeypatch.setattr(playback.os, "getpgid", lambda pid: pid)
+    monkeypatch.setattr(playback.os, "killpg",
+                        lambda pgid, sig: killed.append((pgid, sig)))
 
     s = state.load("sess2")
     s.current_pid = 12345

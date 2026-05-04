@@ -44,6 +44,30 @@ def test_unwraps_snake_case_as_spoken_words():
         == "The pre tool use hook fires automatically now"
 
 
+def test_unwraps_git_refs_as_spoken_words():
+    """Git refs like `origin/main` and `feat/auth-rewrite` are speakable —
+    they're namespaces, not file paths. Slashes get replaced with spaces
+    so TTS reads them as plain words instead of spelling 'slash'."""
+    assert strip_for_voice("Pushed the change to `origin/main` just now") \
+        == "Pushed the change to origin main just now"
+    assert strip_for_voice("Switched to branch `feat/auth-rewrite` for work") \
+        == "Switched to branch feat auth-rewrite for work"
+    # A ref with multiple segments still reads cleanly.
+    assert strip_for_voice("Resetting `refs/heads/main` to upstream now") \
+        == "Resetting refs heads main to upstream now"
+
+
+def test_still_drops_path_with_slash_and_dot():
+    """Real file paths (slash + extension dot, or leading ~/) keep getting
+    dropped. The new git-ref rule must not weaken the path filter."""
+    assert strip_for_voice("Edit `src/main.py` then run the test suite") \
+        == "Edit then run the test suite"
+    assert strip_for_voice("Open `~/foo/bar` and read it carefully") \
+        == "Open and read it carefully"
+    assert strip_for_voice("Run `./scripts/build.sh` in your terminal now") \
+        == "Run in your terminal now"
+
+
 def test_drops_sha_like_inline_code():
     """Git SHAs in backticks (e.g. 'commit `f43f52a`') sound terrible
     spelled out letter-by-letter. Revision ranges like 'a..b' or 'a...b'
