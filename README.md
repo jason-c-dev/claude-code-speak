@@ -179,6 +179,8 @@ You don't write speech tags. The plugin extracts speech in three steps:
 
 1. **Strip** — drop code blocks, inline code, file paths, URLs, markdown, emoji.
 2. **Rewrite** (optional, off by default) — if `config.rewrite` is `true`, the stripped text is passed through Claude Haiku 4.5 with a prompt that says: "rewrite as one or two natural spoken sentences, or return empty if there's nothing worth saying aloud." This step requires a Claude Code Max plan (or API auth) to call Haiku; with rewrite off, the stripped text is spoken directly.
+
+   **Tradeoff:** rewrite produces nicer, more conversational summaries — but each turn pays a Haiku round-trip (typically 1–3s) before the first audio plays. The default (off) keeps end-of-turn audio near-instant; flip it on if you'd rather have polished phrasing than low latency. Mode B's pre-tool cues are unaffected — they always come from the static lookup table, no rewrite.
 3. **Synthesize** — Aura-2 turns it into audio.
 
 When rewrite is enabled, Haiku returning the empty string is a valid signal — Claude says nothing aloud for that turn. Pure tool-use turns naturally produce nothing speakable and stay silent.
